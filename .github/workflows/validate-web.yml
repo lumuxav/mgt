@@ -8,11 +8,17 @@ on:
     paths:
       - 'app/**'
       - 'lib/**'
+      - 'supabase/**'
+      - 'docs/**'
       - 'public/**'
+      - 'mobile-shell/**'
       - 'package.json'
       - 'package-lock.json'
       - 'next.config.mjs'
       - 'vercel.json'
+      - 'capacitor.config.json'
+      - '.env.example'
+      - 'README.md'
       - '.github/workflows/**'
 
 permissions:
@@ -26,6 +32,51 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Enforce Universal MGT project isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXPECTED_SUPABASE_REF="mehuiivevjqmwvaapbgz"
+
+          LEGACY_PATHS=(
+            "app/corrections"
+            "app/records"
+            "app/customer-work"
+            "app/transfers"
+            "app/stocktake"
+            "app/production-report"
+            "app/profit"
+            "lib/branch.js"
+          )
+
+          for path in "${LEGACY_PATHS[@]}"; do
+            if [ -e "$path" ]; then
+              echo "::error::Universal MGT isolation violation: legacy path exists: $path"
+              exit 1
+            fi
+          done
+
+          SCAN_TARGETS=(app lib supabase docs .github README.md .env.example capacitor.config.json mobile-shell)
+
+          mapfile -t SUPABASE_HOSTS < <(
+            grep -RhoE               --exclude-dir=.git               --exclude='package-lock.json'               '[a-z0-9]{20}\.supabase\.co'               "${SCAN_TARGETS[@]}" 2>/dev/null | sort -u || true
+          )
+
+          if [ "${#SUPABASE_HOSTS[@]}" -eq 0 ]; then
+            echo "::error::Universal MGT isolation violation: no Supabase project reference was found."
+            exit 1
+          fi
+
+          for host in "${SUPABASE_HOSTS[@]}"; do
+            if [ "$host" != "${EXPECTED_SUPABASE_REF}.supabase.co" ]; then
+              echo "::error::Universal MGT isolation violation: unexpected Supabase project detected: $host"
+              exit 1
+            fi
+          done
+
+          echo "Universal MGT project isolation gate passed."
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
