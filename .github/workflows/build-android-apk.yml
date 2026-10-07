@@ -184,7 +184,7 @@ jobs:
         with:
           tag_name: mgt-test-latest
           name: MGT Business Suite — Latest Test APK
-          body: Direct-install Android test APK built from the universal business platform branch.
+          body: Direct-install Android test APK built from the isolated Universal MGT branch.
           files: MGT-Business-Suite-Test.apk
           make_latest: false
 
