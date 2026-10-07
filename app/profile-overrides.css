@@ -1,0 +1,138 @@
+.profile-avatar {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.profile-avatar-has-photo {
+  background: var(--panel-2);
+}
+
+.home-profile-card {
+  cursor: default;
+  user-select: none;
+}
+
+.home-profile-card .home-profile-avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.24);
+  background: rgba(255,255,255,.16);
+  font-size: 20px;
+}
+
+.home-profile-note {
+  margin-top: auto;
+  padding-top: 20px;
+  font-size: 10px;
+  font-weight: 800;
+  opacity: .72;
+}
+
+.settings-profile-edit-card {
+  align-items: center;
+}
+
+.settings-profile-photo {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  border: 2px solid rgba(255,255,255,.24);
+  background: rgba(255,255,255,.18);
+  font-size: 18px;
+}
+
+.settings-profile-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-photo-button {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 11px;
+  background: rgba(255,255,255,.18);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.settings-photo-button-subtle {
+  background: rgba(0,0,0,.14);
+}
+
+.settings-photo-message {
+  display: block;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: .78;
+}
+
+.app-profile-card {
+  cursor: default;
+}
+
+.app-profile-card .app-avatar,
+.app-mobile-header .app-avatar {
+  overflow: hidden;
+}
+
+@media (max-width: 560px) {
+  .settings-profile-edit-card {
+    align-items: flex-start;
+    gap: 12px;
+    padding: 15px;
+  }
+
+  .settings-profile-photo {
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+  }
+
+  .settings-photo-actions {
+    gap: 6px;
+  }
+
+  .settings-photo-button {
+    padding: 7px 9px;
+    font-size: 10px;
+  }
+
+  .home-profile-card {
+    padding: 22px 16px;
+  }
+
+  .home-profile-stats {
+    gap: 4px;
+  }
+
+  .home-profile-stats strong {
+    font-size: 17px;
+  }
+
+  .home-profile-stats span {
+    font-size: 8px;
+  }
+}

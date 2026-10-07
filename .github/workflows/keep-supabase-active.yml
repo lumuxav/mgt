@@ -1,0 +1,34 @@
+name: MGT Health Monitoring
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */12 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  health-check:
+    name: Check MGT application and database
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      MGT_HEALTHCHECK_SECRET: ${{ secrets.MGT_HEALTHCHECK_SECRET }}
+
+    steps:
+      - name: Check public MGT application
+        run: |
+          curl --fail --silent --show-error             --retry 2 --retry-delay 3             https://mgt-lake.vercel.app/api/health
+
+      - name: Check Universal MGT Supabase connection
+        if: env.MGT_HEALTHCHECK_SECRET != ''
+        run: |
+          curl --fail --silent --show-error             --retry 2 --retry-delay 3             -H "Authorization: Bearer $MGT_HEALTHCHECK_SECRET"             https://mgt-lake.vercel.app/api/health/supabase
+
+      - name: Explain optional database check
+        if: env.MGT_HEALTHCHECK_SECRET == ''
+        run: |
+          echo "Public MGT health passed."
+          echo "Database health check skipped because MGT_HEALTHCHECK_SECRET is not configured in GitHub Actions."
+          echo "Set the same value in Vercel as HEALTHCHECK_SECRET and in GitHub as MGT_HEALTHCHECK_SECRET to enable the protected database check."

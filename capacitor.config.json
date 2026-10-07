@@ -1,0 +1,29 @@
+{
+  "appId": "com.mgt.businesssuite",
+  "appName": "MGT Business Suite",
+  "webDir": "mobile-shell",
+  "server": {
+    "url": "https://mgt-lake.vercel.app",
+    "cleartext": false,
+    "allowNavigation": [
+      "mgt-lake.vercel.app"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DEFAULT",
+      "hidden": false,
+      "animation": "NONE"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true,
+      "autoBackdropColor": "dom"
+    }
+  }
+}

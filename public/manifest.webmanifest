@@ -1,0 +1,72 @@
+{
+  "name": "MGT Business Suite",
+  "short_name": "MGT",
+  "description": "Configurable business management for retail, wholesale, services and industry.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
+  "background_color": "#f4f6fa",
+  "theme_color": "#1f4f8f",
+  "orientation": "any",
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Point of Sale",
+      "short_name": "POS",
+      "url": "/pos",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "short_name": "Stock",
+      "url": "/inventory",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "short_name": "Alerts",
+      "url": "/notifications",
+      "icons": [
+        {
+          "src": "/icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}

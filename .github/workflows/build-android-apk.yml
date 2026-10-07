@@ -1,0 +1,201 @@
+name: Build Android App
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - universal-business-platform
+    paths:
+      - 'capacitor.config.json'
+      - 'mobile-shell/**'
+      - 'assets/logo.svg'
+      - '.github/workflows/build-android-apk.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build-android:
+    name: Build MGT Android packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MGT_KEYSTORE_BASE64: ${{ secrets.MGT_ANDROID_KEYSTORE_BASE64 }}
+      MGT_KEYSTORE_PASSWORD: ${{ secrets.MGT_ANDROID_KEYSTORE_PASSWORD }}
+      MGT_KEY_ALIAS: ${{ secrets.MGT_ANDROID_KEY_ALIAS }}
+      MGT_KEY_PASSWORD: ${{ secrets.MGT_ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Purge superseded completed workflow runs
+        if: contains(github.event.head_commit.message, '[purge-actions]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.status == "completed") | .id' > /tmp/mgt_old_runs.txt
+          while read -r run_id; do
+            [ -z "$run_id" ] && continue
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run_id" || true
+          done < /tmp/mgt_old_runs.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | head -n 1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install Capacitor Android packaging tools
+        run: npm install --no-save @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor/assets@3 @capacitor/keyboard@8 @capacitor/app@8
+
+      - name: Create Android project
+        run: npx cap add android
+
+      - name: Enable camera access for barcode scanning
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text()
+          permission = '<uses-permission android:name="android.permission.CAMERA" />'
+          if permission not in text:
+              manifest_start = text.find("<manifest")
+              if manifest_start < 0:
+                  raise SystemExit("AndroidManifest.xml has no <manifest> element")
+              marker = text.find(">", manifest_start)
+              if marker < 0:
+                  raise SystemExit("AndroidManifest.xml has an invalid <manifest> element")
+              text = text[:marker+1] + "\n    " + permission + text[marker+1:]
+              path.write_text(text)
+          PY
+
+      - name: Generate MGT icon and splash assets
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827' --splashBackgroundColor '#1f3f70' --splashBackgroundColorDark '#111827'
+
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
+
+      - name: Build directly installable test APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Prepare test APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk MGT-Business-Suite-Test.apk
+
+      - name: Upload test APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MGT-Business-Suite-Test-APK
+          path: MGT-Business-Suite-Test.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Detect Android signing configuration
+        id: signing
+        shell: bash
+        run: |
+          if [ -n "$MGT_KEYSTORE_BASE64" ] && [ -n "$MGT_KEYSTORE_PASSWORD" ] && [ -n "$MGT_KEY_ALIAS" ] && [ -n "$MGT_KEY_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure release signing
+        if: steps.signing.outputs.ready == 'true'
+        shell: bash
+        run: |
+          printf '%s' "$MGT_KEYSTORE_BASE64" | base64 --decode > android/app/mgt-release.jks
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          android {
+              signingConfigs {
+                  mgtRelease {
+                      storeFile file("mgt-release.jks")
+                      storePassword System.getenv("MGT_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("MGT_KEY_ALIAS")
+                      keyPassword System.getenv("MGT_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.mgtRelease
+                  }
+              }
+          }
+          GRADLE
+
+      - name: Build signed release APK and AAB
+        if: steps.signing.outputs.ready == 'true'
+        shell: bash
+        run: |
+          cd android
+          ./gradlew assembleRelease bundleRelease
+          cd ..
+          cp android/app/build/outputs/apk/release/app-release.apk MGT-Business-Suite-Release.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab MGT-Business-Suite-Release.aab
+
+      - name: Upload signed release artifacts
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MGT-Business-Suite-Signed-Release
+          path: |
+            MGT-Business-Suite-Release.apk
+            MGT-Business-Suite-Release.aab
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove superseded pre-separation stable package
+        if: contains(github.event.head_commit.message, '[clean-universal]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mgt-latest --cleanup-tag --yes || true
+          gh release delete mgt-test-latest --cleanup-tag --yes || true
+
+      - name: Publish test APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mgt-test-latest
+          name: MGT Business Suite — Latest Test APK
+          body: Direct-install Android test APK built from the universal business platform branch.
+          files: MGT-Business-Suite-Test.apk
+          make_latest: false
+
+      - name: Publish signed Android release
+        if: steps.signing.outputs.ready == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mgt-latest
+          name: MGT Business Suite — Latest Signed Android
+          body: Signed Android APK and Google Play AAB built from the universal business platform branch.
+          files: |
+            MGT-Business-Suite-Release.apk
+            MGT-Business-Suite-Release.aab
+          make_latest: true

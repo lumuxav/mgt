@@ -1,0 +1,68 @@
+name: Validate iOS App
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - universal-business-platform
+    paths:
+      - 'capacitor.config.json'
+      - 'mobile-shell/**'
+      - 'assets/logo.svg'
+      - '.github/workflows/validate-ios.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-ios:
+    name: Validate MGT Business Suite for iPhone and iPad
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install iOS packaging tools
+        run: npm install --no-save @capacitor/core@8 @capacitor/cli@8 @capacitor/ios@8 @capacitor/assets@3 @capacitor/keyboard@8 @capacitor/app@8
+
+      - name: Create iOS project
+        run: npx cap add ios
+
+      - name: Configure iOS camera usage description
+        shell: bash
+        run: |
+          PLIST="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription MGT uses the camera only when you choose to scan a product barcode." "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string MGT uses the camera only when you choose to scan a product barcode." "$PLIST"
+
+      - name: Generate MGT iOS app icon and splash assets
+        run: npx @capacitor/assets generate --ios --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827' --splashBackgroundColor '#1f3f70' --splashBackgroundColorDark '#111827'
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Inspect generated Xcode project
+        run: |
+          find ios/App -maxdepth 2 \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print
+
+      - name: Compile unsigned iOS simulator build
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

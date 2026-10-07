@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1f4f8f" />
+  <title>MGT Business Suite</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Arial, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111827; color: #f8fafc; }
+    main { width: min(92vw, 420px); text-align: center; padding: 32px; }
+    .mark { width: 76px; height: 76px; margin: 0 auto 18px; display: grid; place-items: center; border-radius: 20px; background: #1f4f8f; font-weight: 800; font-size: 24px; }
+    h1 { margin: 0 0 10px; font-size: 24px; }
+    p { margin: 0 0 18px; opacity: .78; line-height: 1.5; }
+    a { display: inline-block; border-radius: 12px; background: #1f4f8f; color: white; padding: 12px 16px; text-decoration: none; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">MGT</div>
+    <h1>MGT Business Suite</h1>
+    <p id="status">The native shell connects securely to the Universal MGT web application. An internet connection is required for live business data.</p>
+    <a id="open" href="https://mgt-lake.vercel.app">Open MGT</a>
+    <script>
+      const status = document.getElementById('status');
+      const open = document.getElementById('open');
+      const sync = () => {
+        const online = navigator.onLine !== false;
+        status.textContent = online
+          ? 'Connection available. Open MGT to continue to the live business workspace.'
+          : 'You are offline. MGT will not post sales, stock, payments or finance changes until a connection is restored.';
+        open.style.opacity = online ? '1' : '.45';
+        open.style.pointerEvents = online ? 'auto' : 'none';
+      };
+      window.addEventListener('online', sync);
+      window.addEventListener('offline', sync);
+      sync();
+    </script>
+  </main>
+</body>
+</html>
