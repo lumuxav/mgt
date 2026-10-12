@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
 import { getBusinessConfig, getDefaultLocation, moduleEnabled } from '../lib/platformConfig'
-import { getPlatformContext, isUniversalSchemaMissing, loadBusinessConfigFromDatabase } from '../lib/platformDb'
-import { getSessionProfile } from '../lib/sessionCache'
+import { getPlatformContext, isUniversalSchemaMissing } from '../lib/platformDb'
 import ProfileAvatar from './components/ProfileAvatar'
 
 const day = (value) => new Date(value).toISOString().slice(0, 10)
@@ -32,15 +31,11 @@ export default function HomePage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const { session, profile: cachedProfile } = await getSessionProfile()
-        if (!session) return (window.location.href = '/login')
-        setUserId(session.user.id)
-        setProfile(cachedProfile)
-
-        const databaseBusiness = await loadBusinessConfigFromDatabase().catch(() => null)
-        if (databaseBusiness) setBusiness(databaseBusiness)
-
         const platform = await getPlatformContext()
+        if (!platform.session) return (window.location.href = '/login')
+        setUserId(platform.session.user.id)
+        setProfile(platform.user)
+        setBusiness(getBusinessConfig())
         setContext(platform)
         if (!platform.organization?.id) {
           setBackendReady(false)
@@ -187,3 +182,4 @@ export default function HomePage() {
     </main>
   )
 }
+

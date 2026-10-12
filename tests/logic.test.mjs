@@ -7,6 +7,7 @@ import { openingBalanceDue, salesBalanceDue, customerBalanceMap } from '../lib/b
 import { resolveTarget } from '../lib/paymentTargets.js'
 import { saveProviderStatus } from '../lib/serverPaymentLifecycle.js'
 import { returnsAsOf, refundedBySale, returnedByItem, netItemCost } from '../lib/salesReporting.js'
+import { createScopedMetadataCache } from '../lib/platformContextCache.js'
 
 test('staff cannot open a hidden management route by typing its URL', () => {
   assert.equal(hasRoutePermission('/accounting', ['sales.view'], 'cashier'), false)
@@ -109,8 +110,12 @@ test('pending collections can still advance to succeeded', async () => {
 async function cacheHarness() {
   let user = 'A'
   const requests = []
+  const signOutRequests = []
   const mock = {
-    auth: { getSession: async () => ({ data: { session: user ? { user: { id: user } } : null }, error: null }) },
+    auth: {
+      getSession: async () => ({ data: { session: user ? { user: { id: user } } : null }, error: null }),
+      signOut: () => new Promise((resolve) => signOutRequests.push(() => { user = null; resolve({ error: null }) })),
+    },
     from: () => {
       let id
       const query = {
@@ -123,9 +128,10 @@ async function cacheHarness() {
   }
   const source = (await readFile(new URL('../lib/sessionCache.js', import.meta.url), 'utf8'))
     .replace("import { supabase } from './supabase'", 'const supabase = mock')
+    .replace("import { platformMetadataCache } from './platformContextCache'", '')
     .replaceAll('export ', '')
-  const cache = new Function('mock', source + '\nreturn { getSessionProfile, setCachedProfile, clearSessionProfileCache };')(mock)
-  return { ...cache, requests, switchUser: value => { user = value } }
+  const cache = new Function('mock', 'platformMetadataCache', source + '\nreturn { getSessionProfile, setCachedProfile, clearSessionProfileCache, signOutAndRedirect, isSigningOut };')(mock, createScopedMetadataCache())
+  return { ...cache, requests, signOutRequests, switchUser: value => { user = value } }
 }
 
 test('a slow previous account lookup cannot overwrite the current account cache', async () => {
@@ -166,4 +172,19 @@ test('realtime profile updates survive older in-flight responses', async () => {
   h.requests[0].resolve({ full_name: 'Old A' })
   await pending
   assert.equal((await h.getSessionProfile()).profile.full_name, 'Updated A')
+})
+
+test('concurrent sign-outs share one operation and suppress a second auth-listener redirect', async () => {
+  const h = await cacheHarness()
+  h.setCachedProfile('A', { full_name: 'A' })
+  const first = h.signOutAndRedirect()
+  const second = h.signOutAndRedirect()
+  assert.equal(first, second)
+  assert.equal(h.isSigningOut(), true)
+  await Promise.resolve()
+  assert.equal(h.signOutRequests.length, 1)
+  h.signOutRequests[0]()
+  await first
+  assert.equal(h.isSigningOut(), false)
+  assert.deepEqual(await h.getSessionProfile(), { session: null, profile: null })
 })

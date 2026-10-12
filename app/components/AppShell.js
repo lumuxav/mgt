@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
-import { setCachedProfile, clearSessionProfileCache } from '../../lib/sessionCache'
-import { loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { setCachedProfile, clearSessionProfileCache, isSigningOut, signOutAndRedirect } from '../../lib/sessionCache'
+import { getPlatformContext, invalidatePlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
 import { hasRoutePermission } from '../../lib/routeAccess'
 import { loadNotificationInbox, notificationCategoryEnabled, syncNotificationSystem } from '../../lib/notifications'
 import {
@@ -103,6 +103,8 @@ export default function AppShell({ children }) {
   const [canManageUsers, setCanManageUsers] = useState(false)
   const [grantedPermissions, setGrantedPermissions] = useState([])
   const [accessChecked, setAccessChecked] = useState(false)
+  const [accessError, setAccessError] = useState(null)
+  const [accessAttempt, setAccessAttempt] = useState(0)
   const [notificationCount,setNotificationCount] = useState(0)
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const isStandalone = pathname === '/login' || pathname === '/setup' || pathname === '/onboarding' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname === '/accept-invite' || pathname === '/shop' || pathname.startsWith('/shop/')
@@ -124,16 +126,24 @@ export default function AppShell({ children }) {
     let mounted = true
     let refreshTimer = null
     let configChannel = null
+    let configRequest = null
     const subscriptionKey = `${Date.now()}-${Math.random()}`
 
-    const refreshBusinessConfig = async () => {
-      try {
-        const next = await loadBusinessConfigFromDatabase()
-        if (mounted && next) setBusiness(next)
-      } catch {}
+    const refreshBusinessConfig = () => {
+      if (!mounted) return
+      if (configRequest) return configRequest
+      configRequest = loadBusinessConfigFromDatabase()
+        .then((next) => { if (mounted && next) setBusiness(next) })
+        .catch(() => {})
+        .finally(() => { configRequest = null })
+      return configRequest
     }
 
     refreshBusinessConfig()
+    const onBusinessChanged = () => {
+      invalidatePlatformContext()
+      refreshBusinessConfig()
+    }
 
     configChannel = supabase
       .channel(`mgt-business-config-${profile.organization_id}-${subscriptionKey}`)
@@ -142,19 +152,19 @@ export default function AppShell({ children }) {
         schema: 'public',
         table: 'organization_modules',
         filter: `organization_id=eq.${profile.organization_id}`,
-      }, refreshBusinessConfig)
+      }, onBusinessChanged)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'organizations',
         filter: `id=eq.${profile.organization_id}`,
-      }, refreshBusinessConfig)
+      }, onBusinessChanged)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'locations',
         filter: `organization_id=eq.${profile.organization_id}`,
-      }, refreshBusinessConfig)
+      }, onBusinessChanged)
       .subscribe()
 
     refreshTimer = window.setInterval(refreshBusinessConfig, 60000)
@@ -174,54 +184,64 @@ export default function AppShell({ children }) {
     let mounted = true
     let intervalId = null
     let channel = null
+    let accessRequest = null
+    let checkedUserId = null
+    let accountInvalidated = false
     const subscriptionKey = `${Date.now()}-${Math.random()}`
 
     const forceSignOut = async () => {
-      clearSessionProfileCache()
-      try { await supabase.auth.signOut() } catch {}
-      window.location.replace('/login?disabled=1')
+      try { await signOutAndRedirect('/login?disabled=1') }
+      catch { window.location.replace('/login?disabled=1') }
     }
 
-    const checkAccess = async () => {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-      if (sessionError) return
-      if (!session) return window.location.replace('/login')
+    const checkAccess = () => {
+      if (!mounted || accountInvalidated) return Promise.resolve(null)
+      if (accessRequest) return accessRequest
+      const request = (async () => {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (!mounted || accountInvalidated) return null
+        if (sessionError) throw sessionError
+        if (!session) { window.location.replace('/login'); return null }
 
-      const id = session.user.id
-      if (mounted) setUserId(id)
+        const id = session.user.id
+        checkedUserId = id
+        const [profileResult, permissionResult] = await Promise.all([
+          supabase.from('users').select('id, full_name, role, active, archived_at, organization_id, default_location_id').eq('id', id).maybeSingle(),
+          supabase.rpc('current_permissions'),
+        ])
+        if (!mounted || accountInvalidated) return null
+        if (profileResult.error) throw profileResult.error
+        const data = profileResult.data
+        if (!data || data.active === false || data.archived_at) { await forceSignOut(); return null }
+        if (!data.organization_id) { window.location.replace('/onboarding'); return null }
+        if (permissionResult.error) throw permissionResult.error
 
-      const { data, error } = await supabase.from('users').select('full_name, role, active, archived_at, organization_id, default_location_id').eq('id', id).maybeSingle()
-      if (!mounted) return
-      if (error) return
-      if (!data || data.active === false || data.archived_at) return forceSignOut()
-      if (!data.organization_id) return window.location.replace('/onboarding')
-
-      setCachedProfile(id, data)
-      if (mounted) setProfile(data)
-
-      const { data: permissionRows, error: permissionError } = await supabase.rpc('current_permissions')
-      if (permissionError) return
-      const resolvedPermissions = (permissionRows || []).map((row) => row.permission).filter(Boolean)
-      if (mounted) {
+        const resolvedPermissions = (permissionResult.data || []).map((row) => row.permission).filter(Boolean)
+        setCachedProfile(id, data)
+        setUserId(id)
+        setProfile(data)
         setGrantedPermissions(resolvedPermissions)
         setCanManageUsers(resolvedPermissions.includes('users.manage'))
         setAccessChecked(true)
-      }
+        setAccessError(null)
+        return id
+      })().catch((error) => {
+        if (mounted && !accountInvalidated) setAccessError(error.message || 'Could not check account access. Please try again.')
+        return null
+      }).finally(() => { if (accessRequest === request) accessRequest = null })
+      accessRequest = request
+      return request
     }
 
     const load = async () => {
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error) return
-      if (!session) return window.location.replace('/login')
-
-      const id = session.user.id
-      if (mounted) setUserId(id)
-      await checkAccess()
-      if (!mounted) return
+      const id = await checkAccess()
+      if (!id || !mounted) return
+      getPlatformContext().catch(() => {})
 
       channel = supabase
         .channel(`mgt-user-access-${id}-${subscriptionKey}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `id=eq.${id}` }, (payload) => {
+          if (!mounted || accountInvalidated || checkedUserId !== id) return
           if (payload.eventType === 'DELETE' || payload?.new?.active === false || payload?.new?.archived_at) return forceSignOut()
           if (payload?.new) {
             setCachedProfile(id, payload.new)
@@ -236,6 +256,19 @@ export default function AppShell({ children }) {
 
     const onFocus = () => checkAccess()
     const onVisibility = () => { if (document.visibilityState === 'visible') checkAccess() }
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return
+      if (event === 'SIGNED_OUT' || (checkedUserId && session?.user?.id !== checkedUserId)) {
+        accountInvalidated = true
+        clearSessionProfileCache()
+        setProfile(null)
+        setUserId(null)
+        setGrantedPermissions([])
+        setAccessChecked(false)
+        if (event === 'SIGNED_OUT') { if (!isSigningOut()) window.location.replace('/login') }
+        else setAccessAttempt((attempt) => attempt + 1)
+      }
+    })
 
     load()
     window.addEventListener('focus', onFocus)
@@ -243,12 +276,13 @@ export default function AppShell({ children }) {
 
     return () => {
       mounted = false
+      authListener.subscription.unsubscribe()
       if (intervalId) window.clearInterval(intervalId)
       if (channel) supabase.removeChannel(channel)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [isStandalone, userId])
+  }, [isStandalone, accessAttempt])
 
   useEffect(() => {
     if (isStandalone || !userId || !profile?.organization_id) return
@@ -357,6 +391,14 @@ export default function AppShell({ children }) {
   const brandMark = business.shortName || 'MGT'
 
   if (isStandalone) return children
+  if (!accessChecked && accessError) return (
+    <main className="page-wrap">
+      <div className="page-card p-6" role="alert">
+        <p>{accessError}</p>
+        <button type="button" className="btn-primary mt-4 rounded-xl px-4 py-2 font-bold" onClick={() => { setAccessError(null); setAccessAttempt((attempt) => attempt + 1) }}>Try again</button>
+      </div>
+    </main>
+  )
   if (!accessChecked || business.organizationId !== profile?.organization_id) return <main className="page-wrap text-muted">Checking account access...</main>
 
   return (

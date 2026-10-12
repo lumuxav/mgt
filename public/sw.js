@@ -1,4 +1,4 @@
-const CACHE_NAME='mgt-shell-v3'
+const CACHE_NAME='mgt-shell-v4'
 const SHELL=['/offline','/icon.svg','/manifest.webmanifest']
 
 self.addEventListener('install',event=>{
@@ -47,6 +47,7 @@ self.addEventListener('fetch',event=>{
     event.respondWith((async()=>{
       const cache=await caches.open(CACHE_NAME)
       const cached=await cache.match(request)
+      if(cached&&url.pathname.startsWith('/_next/static/'))return cached
       const network=fetch(request).then(response=>{
         if(response.ok)cache.put(request,response.clone())
         return response
@@ -55,3 +56,4 @@ self.addEventListener('fetch',event=>{
     })())
   }
 })
+

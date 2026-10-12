@@ -38,6 +38,7 @@ export default function PosPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [completedSale, setCompletedSale] = useState(null)
+  const locationRequest = useRef(0)
 
   const canDiscount = permissions.includes('sales.discount')
   const online = useOnlineStatus()
@@ -45,6 +46,7 @@ export default function PosPage() {
 
   const loadLocationData = async (locId, userId = context?.user?.id) => {
     if (!locId) return
+    const request = ++locationRequest.current
 
     const [stockRes, tillRes] = await Promise.all([
       supabase.from('stock_balances').select('product_id,quantity,reserved_quantity').eq('location_id', locId),
@@ -55,20 +57,19 @@ export default function PosPage() {
 
     if (stockRes.error && !String(stockRes.error.message || '').includes('permission')) throw stockRes.error
 
-    const nextStock = {}
-    for (const row of stockRes.data || []) nextStock[row.product_id] = Number(row.quantity || 0) - Number(row.reserved_quantity || 0)
-    setStockMap(nextStock)
-
     if (tillRes.error) throw tillRes.error
-    setTill(tillRes.data || null)
-
+    let payments = []
     if (tillRes.data?.id) {
       const { data, error } = await supabase.from('payments').select('amount,direction,method,created_at').eq('till_session_id', tillRes.data.id)
       if (error) throw error
-      setTillPayments(data || [])
-    } else {
-      setTillPayments([])
+      payments = data || []
     }
+    if (request !== locationRequest.current) return
+    const nextStock = {}
+    for (const row of stockRes.data || []) nextStock[row.product_id] = Number(row.quantity || 0) - Number(row.reserved_quantity || 0)
+    setStockMap(nextStock)
+    setTill(tillRes.data || null)
+    setTillPayments(payments)
   }
 
   const load = async () => {
@@ -80,12 +81,14 @@ export default function PosPage() {
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
 
       const org = ctx.organization.id
+      const preferredLocation = locationId || ctx.location?.id || ''
       const [permissionRes, productsRes, customersRes, locationsRes, debtsRes] = await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('products').select('id,name,sku,barcode,item_type,unit,track_inventory,cost_price,selling_price,wholesale_price,tax_rate,active').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('customers').select('id,name,phone,email,credit_limit,active').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true).order('name'),
         supabase.rpc('get_customer_sales_balances'),
+        preferredLocation ? loadLocationData(preferredLocation, ctx.user?.id) : Promise.resolve(),
       ])
 
       for (const result of [permissionRes, productsRes, customersRes, locationsRes, debtsRes]) {
@@ -100,9 +103,9 @@ export default function PosPage() {
 
       setDebtMap(customerBalanceMap(debtsRes.data || []))
 
-      const resolvedLocation = locationId || ctx.location?.id || locationsRes.data?.[0]?.id || ''
+      const resolvedLocation = preferredLocation || locationsRes.data?.[0]?.id || ''
       setLocationId(resolvedLocation)
-      if (resolvedLocation) await loadLocationData(resolvedLocation, ctx.user?.id)
+      if (resolvedLocation && !preferredLocation) await loadLocationData(resolvedLocation, ctx.user?.id)
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Could not open POS.' })
     } finally {
@@ -112,10 +115,20 @@ export default function PosPage() {
 
   useEffect(() => { load() }, [])
 
-  useEffect(() => {
-    if (!locationId || !context?.user?.id) return
-    loadLocationData(locationId, context.user.id).catch((error) => setMessage({ type: 'error', text: error.message }))
-  }, [locationId, context?.user?.id])
+  const changeLocation = async (id) => {
+    setLocationId(id)
+    setLoading(true)
+    try {
+      await loadLocationData(id, context?.user?.id)
+    } catch (error) {
+      setStockMap({})
+      setTill(null)
+      setTillPayments([])
+      setMessage({ type: 'error', text: error.message })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     setCart((current) => current.map((line) => {
@@ -353,7 +366,7 @@ export default function PosPage() {
       )}
 
       <section className="mb-5 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
-        <select className="input-base" value={locationId} onChange={(event) => setLocationId(event.target.value)}>
+        <select className="input-base" value={locationId} onChange={(event) => changeLocation(event.target.value)}>
           {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
         </select>
         <div className="flex rounded-xl border border-[var(--line)] bg-[var(--panel)] p-1">

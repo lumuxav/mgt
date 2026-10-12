@@ -37,17 +37,22 @@ export default function AcceptInvitePage() {
 
   useEffect(() => {
     let mounted = true
+    let sessionTimer = null
     resolveSession()
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (!mounted) return
       if (['SIGNED_IN', 'INITIAL_SESSION', 'PASSWORD_RECOVERY'].includes(event)) {
-        await resolveSession()
+        if (sessionTimer) window.clearTimeout(sessionTimer)
+        sessionTimer = window.setTimeout(() => {
+          if (mounted) resolveSession().catch((err) => { if (mounted) setError(err.message || 'Could not open the invitation.') })
+        }, 0)
       }
     })
 
     return () => {
       mounted = false
+      if (sessionTimer) window.clearTimeout(sessionTimer)
       listener.subscription.unsubscribe()
     }
   }, [])
@@ -113,3 +118,4 @@ export default function AcceptInvitePage() {
     </main>
   )
 }
+

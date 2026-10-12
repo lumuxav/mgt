@@ -14,7 +14,7 @@ import {
   saveBusinessConfig,
   templateConfig,
 } from '../../lib/platformConfig'
-import { loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { invalidatePlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
 
 const slug = () => Math.random().toString(36).slice(2, 8)
 
@@ -197,6 +197,7 @@ export default function BusinessSetupPage() {
       })
       if (moduleError) throw moduleError
 
+      invalidatePlatformContext()
       const authoritative = await loadBusinessConfigFromDatabase()
       const resolved = authoritative || saveBusinessConfig(normalized)
       setConfig(resolved)
@@ -346,3 +347,4 @@ export default function BusinessSetupPage() {
     </main>
   )
 }
+

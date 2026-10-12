@@ -3,6 +3,7 @@
 import { useEffect,useMemo,useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
+import { signOutAndRedirect } from '../../lib/sessionCache'
 import { adminApi } from '../../lib/adminApi'
 
 const formatDate=value=>value?new Date(value).toLocaleString():'Never'
@@ -27,8 +28,7 @@ export default function SystemControlPage(){
     if(!result.ok){
       setError(result.error||'Could not load system status.')
       if(result.status===401){
-        await supabase.auth.signOut()
-        setTimeout(()=>{window.location.href='/login'},800)
+        await signOutAndRedirect('/login',800)
       }
     }else setData(result)
     setLoading(false)
@@ -124,3 +124,4 @@ export default function SystemControlPage(){
     <p className="mt-6 text-xs text-muted">System status generated {data?.generated_at?formatDate(data.generated_at):'—'}. Passwords and provider secrets are never displayed here.</p>
   </main>
 }
+

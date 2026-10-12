@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
+import { signOutAndRedirect } from '../../lib/sessionCache'
 import ThemePicker from '../components/ThemePicker'
 import ProfileAvatar, { avatarStorageKey } from '../components/ProfileAvatar'
 import { DEFAULT_NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, loadNotificationPreferences, saveNotificationPreferences } from '../../lib/notifications'
@@ -123,8 +124,7 @@ export default function SettingsPage() {
   }, [])
 
   const signOut = async () => {
-    await supabase.auth.signOut()
-    window.location.href = '/login'
+    await signOutAndRedirect()
   }
 
   const initials = (profile?.full_name || 'MGT').split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase()
@@ -343,3 +343,4 @@ export default function SettingsPage() {
     </main>
   )
 }
+
