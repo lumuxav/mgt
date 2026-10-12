@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
+import { returnsAsOf, refundedBySale, returnedByItem, netItemCost } from '../../lib/salesReporting'
 import { getBusinessConfig } from '../../lib/platformConfig'
 import { Bars, ProgressBar, Sparkline } from '../components/ReportCharts'
 
@@ -67,11 +68,11 @@ export default function ExecutiveDashboardPage(){
         ]=await Promise.all([
           supabase.from('sales').select('id,location_id,customer_id,sold_by,total_amount,amount_paid,refunded_amount,status,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),
           supabase.from('sale_items').select('id,sale_id,product_id,description,quantity,unit_cost,line_total,discount_amount').limit(20000),
-          supabase.from('sale_returns').select('id,sale_id,total_amount,created_at').eq('organization_id',org).limit(5000),
+          supabase.from('sale_returns').select('id,sale_id,total_amount,created_at,sale_return_items(sale_item_id,quantity)').eq('organization_id',org).limit(5000),
           supabase.from('expenses').select('id,location_id,category,amount,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),
           supabase.from('payments').select('id,location_id,direction,payment_type,method,amount,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(10000),
           supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
-          supabase.from('customers').select('id,name,customer_group,credit_limit,opening_balance').eq('organization_id',org).eq('active',true),
+          supabase.from('customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
           supabase.from('users').select('id,full_name,role,default_location_id,active').eq('organization_id',org).eq('active',true),
           supabase.from('products').select('id,name,sku,cost_price,selling_price,reorder_level,track_inventory,active').eq('organization_id',org).eq('active',true),
           supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,updated_at,products(organization_id)').limit(15000),
@@ -151,10 +152,14 @@ export default function ExecutiveDashboardPage(){
     const selectedItems=saleItems.filter(x=>selectedIds.has(x.sale_id))
     const prevItems=saleItems.filter(x=>prevIds.has(x.sale_id))
 
-    const productRevenue=selectedSales.reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.refunded_amount)),0)
-    const prevRevenue=prevSales.reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.refunded_amount)),0)
-    const productCogs=selectedItems.reduce((s,x)=>s+num(x.quantity)*num(x.unit_cost),0)
-    const prevCogs=prevItems.reduce((s,x)=>s+num(x.quantity)*num(x.unit_cost),0)
+    const eligibleReturns=returnsAsOf(returns,endDate),previousReturns=returnsAsOf(returns,prevEnd)
+    const refunds=refundedBySale(eligibleReturns),previousRefunds=refundedBySale(previousReturns)
+    const returned=returnedByItem(eligibleReturns.flatMap(row=>row.sale_return_items||[]))
+    const previousReturned=returnedByItem(previousReturns.flatMap(row=>row.sale_return_items||[]))
+    const productRevenue=selectedSales.reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(refunds[x.id])),0)
+    const prevRevenue=prevSales.reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(previousRefunds[x.id])),0)
+    const productCogs=netItemCost(selectedItems,returned)
+    const prevCogs=netItemCost(prevItems,previousReturned)
     const productGross=productRevenue-productCogs
     const prevGross=prevRevenue-prevCogs
 
@@ -177,29 +182,31 @@ export default function ExecutiveDashboardPage(){
     const salesReceivables=sales.filter(x=>!locationFilter||x.location_id===locationFilter).reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.refunded_amount)-num(x.amount_paid)),0)
     const jobReceivables=workOrders.filter(x=>x.status!=='cancelled'&&(!locationFilter||x.location_id===locationFilter)).reduce((s,x)=>s+Math.max(0,num(x.final_amount)-num(x.amount_paid)),0)
     const projectReceivables=projectInvoices.filter(x=>x.status!=='void'&&(!locationFilter||x.location_id===locationFilter)).reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.amount_paid)),0)
-    const receivables=salesReceivables+jobReceivables+projectReceivables
+    const openingReceivables=locationFilter?0:customers.reduce((sum,c)=>sum+Math.max(0,num(c.opening_balance)-num(c.opening_balance_paid)),0)
+    const receivables=openingReceivables+salesReceivables+jobReceivables+projectReceivables
 
-    const payables=purchases.filter(x=>!locationFilter||x.location_id===locationFilter).reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.amount_paid)),0)
+    const openingPayables=locationFilter?0:suppliers.reduce((sum,s)=>sum+Math.max(0,num(s.opening_balance)-num(s.opening_balance_paid)),0)
+    const payables=openingPayables+purchases.filter(x=>x.status!=='cancelled'&&(!locationFilter||x.location_id===locationFilter)).reduce((s,x)=>s+Math.max(0,num(x.total_amount)-num(x.amount_paid)),0)
     const inventoryValue=balances.filter(x=>!locationFilter||x.location_id===locationFilter).reduce((s,x)=>{
       const p=products.find(p=>p.id===x.product_id)
       return s+Math.max(0,num(x.quantity))*num(p?.cost_price)
     },0)
 
     const dailyMap={}
-    for(const sale of selectedSales){const k=dayKey(sale.created_at);dailyMap[k]=(dailyMap[k]||0)+Math.max(0,num(sale.total_amount)-num(sale.refunded_amount))}
+    for(const sale of selectedSales){const k=dayKey(sale.created_at);dailyMap[k]=(dailyMap[k]||0)+Math.max(0,num(sale.total_amount)-num(refunds[sale.id]))}
     const daily=Object.entries(dailyMap).sort(([a],[b])=>a.localeCompare(b)).map(([label,value])=>({label,value}))
 
     const locationMap={}
     for(const loc of locations)locationMap[loc.id]={id:loc.id,label:loc.name,revenue:0,gross:0,transactions:0,expenses:0}
     for(const sale of sales.filter(x=>inRange(x.created_at,startDate,endDate))){
       const row=locationMap[sale.location_id]||{id:sale.location_id,label:names.locations[sale.location_id]||'Location',revenue:0,gross:0,transactions:0,expenses:0}
-      const revenue=Math.max(0,num(sale.total_amount)-num(sale.refunded_amount))
+      const revenue=Math.max(0,num(sale.total_amount)-num(refunds[sale.id]))
       row.revenue+=revenue;row.transactions+=1;locationMap[sale.location_id]=row
     }
     const saleCostById={}
-    for(const item of saleItems)saleCostById[item.sale_id]=(saleCostById[item.sale_id]||0)+num(item.quantity)*num(item.unit_cost)
+    for(const item of saleItems)saleCostById[item.sale_id]=(saleCostById[item.sale_id]||0)+netItemCost([item],returned)
     for(const sale of sales.filter(x=>inRange(x.created_at,startDate,endDate))){
-      const row=locationMap[sale.location_id];if(row)row.gross+=Math.max(0,num(sale.total_amount)-num(sale.refunded_amount))-num(saleCostById[sale.id])
+      const row=locationMap[sale.location_id];if(row)row.gross+=Math.max(0,num(sale.total_amount)-num(refunds[sale.id]))-num(saleCostById[sale.id])
     }
     for(const expense of rangeExpenses){
       const row=locationMap[expense.location_id];if(row)row.expenses+=num(expense.amount)
@@ -268,7 +275,7 @@ export default function ExecutiveDashboardPage(){
       overBudget:overBudget.length,onlineRevenue,onlineOpen
     }
   },[
-    sales,saleItems,expenses,payments,locations,products,balances,stockMovements,purchases,workOrders,productionOrders,payrollEntries,
+    sales,saleItems,returns,expenses,payments,locations,customers,suppliers,products,balances,stockMovements,purchases,workOrders,productionOrders,payrollEntries,
     maintenance,fuelLogs,deliveries,projects,projectInvoices,onlineOrders,startDate,endDate,locationFilter,names
   ])
 
@@ -356,3 +363,4 @@ export default function ExecutiveDashboardPage(){
     </section>
   </main>
 }
+

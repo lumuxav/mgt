@@ -2,67 +2,11 @@ import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { consumeServerRateLimit, verifyOrganizationPermission } from '../../../../lib/serverAccess'
 import { normalizeUgandaPhone,requestProviderPayment } from '../../../../lib/serverPaymentProviders'
+import { resolveTarget } from '../../../../lib/paymentTargets'
+import { saveProviderStatus } from '../../../../lib/serverPaymentLifecycle'
 
 const sha=(value)=>crypto.createHash('sha256').update(value).digest('hex')
 const ref=()=>`MGT-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
-
-async function resolveTarget(adminClient,organizationId,targetType,targetId,customerId,amount){
-  const numeric=Number(amount)
-  if(!Number.isFinite(numeric)||numeric<=0)throw new Error('Payment amount must be greater than zero.')
-
-  if(targetType==='sale'){
-    const {data,error}=await adminClient.from('sales').select('id,location_id,customer_id,total_amount,amount_paid,refunded_amount,sale_number').eq('organization_id',organizationId).eq('id',targetId).maybeSingle()
-    if(error)throw error;if(!data)throw new Error('Sale not found.')
-    const due=Math.max(0,Number(data.total_amount||0)-Number(data.refunded_amount||0)-Number(data.amount_paid||0))
-    if(numeric>due+0.009)throw new Error('Payment exceeds the sale balance.')
-    return {target:data,locationId:data.location_id,customerId:data.customer_id,balance:due,label:data.sale_number}
-  }
-
-  if(targetType==='customer_debt'){
-    const {data:customer,error}=await adminClient.from('customers').select('id,name').eq('organization_id',organizationId).eq('id',customerId||targetId).eq('active',true).maybeSingle()
-    if(error)throw error;if(!customer)throw new Error('Customer not found.')
-    const {data:sales,error:salesError}=await adminClient.from('sales').select('total_amount,amount_paid,refunded_amount').eq('organization_id',organizationId).eq('customer_id',customer.id)
-    if(salesError)throw salesError
-    const due=(sales||[]).reduce((sum,s)=>sum+Math.max(0,Number(s.total_amount||0)-Number(s.refunded_amount||0)-Number(s.amount_paid||0)),0)
-    if(numeric>due+0.009)throw new Error('Payment exceeds the customer balance.')
-    return {target:customer,locationId:null,customerId:customer.id,balance:due,label:customer.name}
-  }
-
-  if(targetType==='work_order'){
-    const {data,error}=await adminClient.from('work_orders').select('id,location_id,customer_id,job_number,title,status,final_amount,quoted_amount,amount_paid').eq('organization_id',organizationId).eq('id',targetId).maybeSingle()
-    if(error)throw error;if(!data)throw new Error('Service job not found.')
-    if(data.status==='cancelled')throw new Error('Cancelled service jobs cannot receive payments.')
-    const {data:lines,error:lineError}=await adminClient.from('work_order_lines').select('line_total').eq('work_order_id',data.id)
-    if(lineError)throw lineError
-    const total=(lines||[]).reduce((sum,x)=>sum+Number(x.line_total||0),0)||Number(data.final_amount||data.quoted_amount||0)
-    const due=Math.max(0,total-Number(data.amount_paid||0))
-    if(numeric>due+0.009)throw new Error('Payment exceeds the service-job balance.')
-    return {target:data,locationId:data.location_id,customerId:data.customer_id,balance:due,label:data.job_number||data.title}
-  }
-
-  if(targetType==='project_invoice'){
-    const {data,error}=await adminClient.from('project_invoices').select('id,location_id,customer_id,invoice_number,total_amount,amount_paid,status').eq('organization_id',organizationId).eq('id',targetId).maybeSingle()
-    if(error)throw error;if(!data)throw new Error('Project invoice not found.')
-    const due=Math.max(0,Number(data.total_amount||0)-Number(data.amount_paid||0))
-    if(numeric>due+0.009)throw new Error('Payment exceeds the project invoice balance.')
-    return {target:data,locationId:data.location_id,customerId:data.customer_id,balance:due,label:data.invoice_number}
-  }
-
-  if(targetType==='online_order'){
-    const {data,error}=await adminClient.from('online_orders').select('id,location_id,customer_id,order_number,total_amount,payment_status,status,customer_phone').eq('organization_id',organizationId).eq('id',targetId).maybeSingle()
-    if(error)throw error;if(!data)throw new Error('Online order not found.')
-    if(data.status==='cancelled')throw new Error('Cancelled online orders cannot receive payments.')
-    if(data.payment_status==='paid')throw new Error('Online order is already paid.')
-    if(Math.abs(numeric-Number(data.total_amount||0))>0.009)throw new Error('Online-order payment must equal the order total.')
-    return {target:data,locationId:data.location_id,customerId:data.customer_id,balance:Number(data.total_amount||0),label:data.order_number,phone:data.customer_phone}
-  }
-
-  if(targetType==='unallocated'){
-    return {target:null,locationId:null,customerId:customerId||null,balance:numeric,label:'Unallocated payment'}
-  }
-
-  throw new Error('Unsupported payment target.')
-}
 
 export async function GET(req){
   const check=await verifyOrganizationPermission(req,'payments.view','payments')
@@ -105,6 +49,9 @@ export async function POST(req){
       .eq('organization_id',organizationId).eq('id',connectionId).maybeSingle()
     if(connectionError)throw connectionError
     if(!connectionRow||!connectionRow.active)throw new Error('Payment provider connection is not active.')
+    const {data:organization,error:organizationError}=await adminClient.from('organizations').select('currency').eq('id',organizationId).single()
+    if(organizationError)throw organizationError
+    if(String(connectionRow.currency).toUpperCase()!==String(organization.currency).toUpperCase())throw new Error('Payment provider currency must match the business currency.')
 
     const target=await resolveTarget(adminClient,organizationId,targetType,targetId,body.customer_id||null,amount)
     const phone=normalizeUgandaPhone(body.payer_phone||target.phone||'')
@@ -135,15 +82,14 @@ export async function POST(req){
       reference:externalReference,phone,amount,currency,callbackUrl,note:target.label,targetType,targetId,
     })
 
-    const {data:updated,error:updateError}=await adminClient.from('external_payment_transactions').update({
+    const updated=await saveProviderStatus(adminClient,inserted,{
       status:providerResult.status||'pending',
       provider_status:providerResult.provider_status||null,
       provider_reference:providerResult.provider_reference||null,
       request_payload:providerResult.request_payload||{},
       response_payload:providerResult.response_payload||{},
       updated_at:new Date().toISOString(),
-    }).eq('organization_id',organizationId).eq('id',inserted.id).select('*').single()
-    if(updateError)throw updateError
+    })
 
     await adminClient.from('external_payment_events').insert({
       organization_id:organizationId,transaction_id:inserted.id,event_type:'request_sent',
@@ -155,7 +101,7 @@ export async function POST(req){
     if(transaction?.id){
       await check.adminClient.from('external_payment_transactions').update({
         status:'failed',failure_reason:String(error.message||'Payment request failed').slice(0,500),updated_at:new Date().toISOString(),completed_at:new Date().toISOString(),
-      }).eq('id',transaction.id).eq('organization_id',check.organizationId)
+      }).eq('id',transaction.id).eq('organization_id',check.organizationId).neq('status','succeeded').neq('settlement_status','settled')
       await check.adminClient.from('external_payment_events').insert({
         organization_id:check.organizationId,transaction_id:transaction.id,event_type:'request_failed',status:'failed',payload:{error:String(error.message||'Payment request failed').slice(0,500)}
       })
@@ -163,3 +109,4 @@ export async function POST(req){
     return NextResponse.json({error:error.message||'Payment request failed.'},{status:400})
   }
 }
+

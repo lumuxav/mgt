@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
+import { returnsAsOf, refundedBySale } from '../../lib/salesReporting'
 import { getBusinessConfig } from '../../lib/platformConfig'
 import { Bars, ProgressBar } from '../components/ReportCharts'
 
@@ -70,7 +71,7 @@ export default function ReportsPage(){
         ]=await Promise.all([
           supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
           supabase.from('users').select('id,full_name,role,default_location_id,active').eq('organization_id',org).eq('active',true),
-          supabase.from('customers').select('id,name,customer_group,credit_limit,opening_balance').eq('organization_id',org).eq('active',true),
+          supabase.from('customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
           supabase.from('suppliers').select('id,name,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
           supabase.from('products').select('id,name,sku,cost_price,selling_price,reorder_level,track_inventory,active').eq('organization_id',org).eq('active',true),
           supabase.from('sales').select('id,sale_number,location_id,customer_id,sold_by,total_amount,amount_paid,refunded_amount,status,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(8000),
@@ -130,22 +131,29 @@ export default function ReportsPage(){
     const rangeSales=sales.filter(x=>inRange(x.created_at,startDate,endDate)&&locationOk(x.location_id))
     const saleIds=new Set(rangeSales.map(x=>x.id))
     const rangeItems=saleItems.filter(x=>saleIds.has(x.sale_id))
+    const eligibleReturns=returnsAsOf(returns,endDate)
+    const eligibleReturnIds=new Set(eligibleReturns.map(row=>row.id))
+    const refunds=refundedBySale(eligibleReturns)
     const returned={}
-    for(const item of returnItems)returned[item.sale_item_id]=(returned[item.sale_item_id]||0)+num(item.quantity)
+    for(const item of returnItems.filter(row=>eligibleReturnIds.has(row.return_id)))returned[item.sale_item_id]=(returned[item.sale_item_id]||0)+num(item.quantity)
     const saleCost={}
     const saleRevenue={}
-    for(const sale of rangeSales)saleRevenue[sale.id]=Math.max(0,num(sale.total_amount)-num(sale.refunded_amount))
+    for(const sale of rangeSales)saleRevenue[sale.id]=Math.max(0,num(sale.total_amount)-num(refunds[sale.id]))
     for(const item of rangeItems){
       const sold=num(item.quantity),back=Math.min(sold,num(returned[item.id])),net=Math.max(0,sold-back)
       saleCost[item.sale_id]=(saleCost[item.sale_id]||0)+net*num(item.unit_cost)
     }
 
     const productMap={}
+    const itemTotals={}
+    for(const item of rangeItems)itemTotals[item.sale_id]=(itemTotals[item.sale_id]||0)+num(item.line_total)
+    const saleTotals=Object.fromEntries(rangeSales.map(sale=>[sale.id,num(sale.total_amount)]))
     for(const item of rangeItems){
       const sold=num(item.quantity),back=Math.min(sold,num(returned[item.id])),qty=Math.max(0,sold-back),ratio=sold>0?qty/sold:0
       const key=item.product_id||item.description
       if(!productMap[key])productMap[key]={id:key,label:names.products[item.product_id]||item.description,qty:0,revenue:0,gross:0}
-      productMap[key].qty+=qty;productMap[key].revenue+=num(item.line_total)*ratio;productMap[key].gross+=num(item.line_total)*ratio-qty*num(item.unit_cost)
+      const revenue=num(item.line_total)*ratio*(itemTotals[item.sale_id]>0?saleTotals[item.sale_id]/itemTotals[item.sale_id]:0)
+      productMap[key].qty+=qty;productMap[key].revenue+=revenue;productMap[key].gross+=revenue-qty*num(item.unit_cost)
     }
     const productsReport=Object.values(productMap).sort((a,b)=>b.revenue-a.revenue)
 
@@ -181,6 +189,7 @@ export default function ReportsPage(){
 
     const customerMap={}
     const ensureCustomer=id=>{const key=id||'walkin';if(!customerMap[key])customerMap[key]={id:key,label:names.customers[id]||'Walk-in / Unassigned',revenue:0,gross:0,sales:0,serviceRevenue:0,serviceGross:0,projectBillings:0,receivable:0};return customerMap[key]}
+    if(!locationFilter)for(const c of customers)ensureCustomer(c.id).receivable+=Math.max(0,num(c.opening_balance)-num(c.opening_balance_paid))
     for(const sale of rangeSales){const row=ensureCustomer(sale.customer_id);row.revenue+=saleRevenue[sale.id]||0;row.gross+=(saleRevenue[sale.id]||0)-num(saleCost[sale.id]);row.sales++}
     for(const job of rangeJobs){const row=ensureCustomer(job.customer_id);row.serviceRevenue+=num(job.final_amount);row.serviceGross+=num(job.gross_profit)}
     for(const inv of projectInvoices.filter(x=>x.status!=='void'&&inRange(x.issue_date,startDate,endDate)&&locationOk(x.location_id))){const row=ensureCustomer(inv.customer_id);row.projectBillings+=num(inv.total_amount)}
@@ -359,3 +368,4 @@ export default function ReportsPage(){
     </section>}
   </main>
 }
+

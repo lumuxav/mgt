@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { getServerClients } from '../../../../../lib/serverAccess'
 import { checkProviderPayment } from '../../../../../lib/serverPaymentProviders'
+import { saveProviderStatus } from '../../../../../lib/serverPaymentLifecycle'
 
 const sha=(value)=>crypto.createHash('sha256').update(value).digest('hex')
 
@@ -34,7 +35,7 @@ export async function POST(req,{params}){
 
     const providerResult=await checkProviderPayment(connection,transaction)
     const completed=['succeeded','failed','cancelled','expired'].includes(providerResult.status)
-    const {data:updated,error:updateError}=await adminClient.from('external_payment_transactions').update({
+    const updated=await saveProviderStatus(adminClient,transaction,{
       status:providerResult.status,
       provider_status:providerResult.provider_status||null,
       provider_financial_id:providerResult.provider_financial_id||transaction.provider_financial_id||null,
@@ -42,8 +43,7 @@ export async function POST(req,{params}){
       response_payload:providerResult.response_payload||callbackPayload||{},
       completed_at:completed?new Date().toISOString():transaction.completed_at,
       updated_at:new Date().toISOString(),
-    }).eq('id',transaction.id).eq('organization_id',transaction.organization_id).select('*').single()
-    if(updateError)throw updateError
+    })
 
     if(updated.status==='succeeded'&&updated.settlement_status!=='settled'){
       const settled=await adminClient.rpc('server_settle_external_payment',{p_transaction_id:updated.id})
@@ -66,3 +66,4 @@ export async function POST(req,{params}){
     return NextResponse.json({error:error.message||'Callback processing failed.'},{status:400})
   }
 }
+

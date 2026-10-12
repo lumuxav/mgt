@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { setCachedProfile, clearSessionProfileCache } from '../../lib/sessionCache'
 import { loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { hasRoutePermission } from '../../lib/routeAccess'
 import { loadNotificationInbox, notificationCategoryEnabled, syncNotificationSystem } from '../../lib/notifications'
 import {
   PLATFORM_CONFIG_EVENT,
@@ -101,6 +102,7 @@ export default function AppShell({ children }) {
   const [business, setBusiness] = useState(() => getBusinessConfig())
   const [canManageUsers, setCanManageUsers] = useState(false)
   const [grantedPermissions, setGrantedPermissions] = useState([])
+  const [accessChecked, setAccessChecked] = useState(false)
   const [notificationCount,setNotificationCount] = useState(0)
   const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
   const isStandalone = pathname === '/login' || pathname === '/setup' || pathname === '/onboarding' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname === '/accept-invite' || pathname === '/shop' || pathname.startsWith('/shop/')
@@ -122,6 +124,7 @@ export default function AppShell({ children }) {
     let mounted = true
     let refreshTimer = null
     let configChannel = null
+    const subscriptionKey = `${Date.now()}-${Math.random()}`
 
     const refreshBusinessConfig = async () => {
       try {
@@ -133,7 +136,7 @@ export default function AppShell({ children }) {
     refreshBusinessConfig()
 
     configChannel = supabase
-      .channel(`mgt-business-config-${profile.organization_id}`)
+      .channel(`mgt-business-config-${profile.organization_id}-${subscriptionKey}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -171,6 +174,7 @@ export default function AppShell({ children }) {
     let mounted = true
     let intervalId = null
     let channel = null
+    const subscriptionKey = `${Date.now()}-${Math.random()}`
 
     const forceSignOut = async () => {
       clearSessionProfileCache()
@@ -178,31 +182,30 @@ export default function AppShell({ children }) {
       window.location.replace('/login?disabled=1')
     }
 
-    const checkAccess = async (knownUserId = null) => {
+    const checkAccess = async () => {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
       if (sessionError) return
       if (!session) return window.location.replace('/login')
 
-      const id = knownUserId || session.user.id
+      const id = session.user.id
       if (mounted) setUserId(id)
 
-      let { data, error } = await supabase.from('users').select('full_name, role, active, organization_id, default_location_id').eq('id', id).maybeSingle()
-      if (error) {
-        const fallback = await supabase.from('users').select('full_name, role, branch, active').eq('id', id).maybeSingle()
-        data = fallback.data
-        error = fallback.error
-      }
+      const { data, error } = await supabase.from('users').select('full_name, role, active, archived_at, organization_id, default_location_id').eq('id', id).maybeSingle()
+      if (!mounted) return
       if (error) return
-      if (!data || data.active === false) return forceSignOut()
+      if (!data || data.active === false || data.archived_at) return forceSignOut()
+      if (!data.organization_id) return window.location.replace('/onboarding')
 
       setCachedProfile(id, data)
       if (mounted) setProfile(data)
 
-      const { data: permissionRows } = await supabase.rpc('current_permissions')
+      const { data: permissionRows, error: permissionError } = await supabase.rpc('current_permissions')
+      if (permissionError) return
       const resolvedPermissions = (permissionRows || []).map((row) => row.permission).filter(Boolean)
       if (mounted) {
         setGrantedPermissions(resolvedPermissions)
         setCanManageUsers(resolvedPermissions.includes('users.manage'))
+        setAccessChecked(true)
       }
     }
 
@@ -213,24 +216,26 @@ export default function AppShell({ children }) {
 
       const id = session.user.id
       if (mounted) setUserId(id)
-      await checkAccess(id)
+      await checkAccess()
+      if (!mounted) return
 
       channel = supabase
-        .channel(`mgt-user-access-${id}`)
+        .channel(`mgt-user-access-${id}-${subscriptionKey}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `id=eq.${id}` }, (payload) => {
-          if (payload.eventType === 'DELETE' || payload?.new?.active === false) return forceSignOut()
+          if (payload.eventType === 'DELETE' || payload?.new?.active === false || payload?.new?.archived_at) return forceSignOut()
           if (payload?.new) {
             setCachedProfile(id, payload.new)
             if (mounted) setProfile(payload.new)
+            checkAccess()
           }
         })
         .subscribe()
 
-      intervalId = window.setInterval(() => checkAccess(id), 15000)
+      intervalId = window.setInterval(() => checkAccess(), 15000)
     }
 
-    const onFocus = () => checkAccess(userId)
-    const onVisibility = () => { if (document.visibilityState === 'visible') checkAccess(userId) }
+    const onFocus = () => checkAccess()
+    const onVisibility = () => { if (document.visibilityState === 'visible') checkAccess() }
 
     load()
     window.addEventListener('focus', onFocus)
@@ -251,6 +256,7 @@ export default function AppShell({ children }) {
     let notificationChannel = null
     let stateChannel = null
     let syncInterval = null
+    const subscriptionKey = `${Date.now()}-${Math.random()}`
 
     const refreshNotifications = async ({ sync = false, inserted = null } = {}) => {
       try {
@@ -281,7 +287,7 @@ export default function AppShell({ children }) {
     refreshNotifications({ sync: true })
 
     notificationChannel = supabase
-      .channel(`mgt-notifications-${userId}`)
+      .channel(`mgt-notifications-${userId}-${subscriptionKey}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -296,7 +302,7 @@ export default function AppShell({ children }) {
       .subscribe()
 
     stateChannel = supabase
-      .channel(`mgt-notification-state-${userId}`)
+      .channel(`mgt-notification-state-${userId}-${subscriptionKey}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -345,11 +351,13 @@ export default function AppShell({ children }) {
   ].filter((item) => moduleEnabled(business, item.module) && hasPermission(item.permission)).slice(0,4)
   const currentModule = moduleForPath(pathname)
   const routeModuleDisabled = Boolean(currentModule && !moduleEnabled(business, currentModule))
+  const routePermissionDenied = !hasRoutePermission(pathname, grantedPermissions, profile?.role)
   const currentModuleLabel = currentModule ? (MODULE_LABELS[currentModule] || currentModule.replaceAll('_', ' ')) : ''
   const brandName = business.businessName || 'My Business'
   const brandMark = business.shortName || 'MGT'
 
   if (isStandalone) return children
+  if (!accessChecked || business.organizationId !== profile?.organization_id) return <main className="page-wrap text-muted">Checking account access...</main>
 
   return (
     <div className="app-shell">
@@ -410,12 +418,12 @@ export default function AppShell({ children }) {
           </div>
         </header>
         <div className="app-content">
-          {routeModuleDisabled ? (
+          {routeModuleDisabled || routePermissionDenied ? (
             <main className="page-wrap">
               <section className="page-card mx-auto max-w-2xl p-7 text-center">
-                <p className="page-eyebrow">Module disabled</p>
-                <h1 className="mt-2 text-2xl font-black">{currentModuleLabel} is not enabled for this business</h1>
-                <p className="mt-3 text-sm leading-6 text-muted">Your company has turned this module off. Existing business data is preserved; the module is simply hidden from normal use until it is enabled again.</p>
+                <p className="page-eyebrow">{routeModuleDisabled ? 'Module disabled' : 'Access restricted'}</p>
+                <h1 className="mt-2 text-2xl font-black">{routeModuleDisabled ? `${currentModuleLabel} is not enabled for this business` : 'Your role cannot open this workspace'}</h1>
+                <p className="mt-3 text-sm leading-6 text-muted">{routeModuleDisabled ? 'Your company has turned this module off. An authorized manager can enable it in Business Setup.' : 'Contact your business administrator if you need access.'}</p>
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   <Link href="/" className="btn-secondary rounded-xl px-4 py-2 text-sm font-black">Back to Home</Link>
                   {hasPermission('settings.manage') && <Link href="/setup" className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Manage Business Modules</Link>}
@@ -465,3 +473,4 @@ export default function AppShell({ children }) {
     </div>
   )
 }
+

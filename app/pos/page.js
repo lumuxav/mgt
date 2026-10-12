@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
 import { useOnlineStatus } from '../../lib/useOnlineStatus'
+import { customerBalanceMap } from '../../lib/balances'
 import BarcodeScanner from '../components/BarcodeScanner'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
@@ -84,7 +85,7 @@ export default function PosPage() {
         supabase.from('products').select('id,name,sku,barcode,item_type,unit,track_inventory,cost_price,selling_price,wholesale_price,tax_rate,active').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('customers').select('id,name,phone,email,credit_limit,active').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true).order('name'),
-        supabase.from('sales').select('customer_id,total_amount,amount_paid,refunded_amount,payment_status').eq('organization_id', org).not('customer_id', 'is', null),
+        supabase.rpc('get_customer_sales_balances'),
       ])
 
       for (const result of [permissionRes, productsRes, customersRes, locationsRes, debtsRes]) {
@@ -97,12 +98,7 @@ export default function PosPage() {
       setCustomers(customersRes.data || [])
       setLocations(locationsRes.data || [])
 
-      const debts = {}
-      for (const sale of debtsRes.data || []) {
-        const due = Math.max(0, Number(sale.total_amount || 0) - Number(sale.refunded_amount || 0) - Number(sale.amount_paid || 0))
-        if (sale.customer_id) debts[sale.customer_id] = (debts[sale.customer_id] || 0) + due
-      }
-      setDebtMap(debts)
+      setDebtMap(customerBalanceMap(debtsRes.data || []))
 
       const resolvedLocation = locationId || ctx.location?.id || locationsRes.data?.[0]?.id || ''
       setLocationId(resolvedLocation)
@@ -501,3 +497,4 @@ export default function PosPage() {
     </main>
   )
 }
+

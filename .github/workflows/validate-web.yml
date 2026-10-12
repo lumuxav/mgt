@@ -8,6 +8,7 @@ on:
     paths:
       - 'app/**'
       - 'lib/**'
+      - 'tests/**'
       - 'supabase/**'
       - 'docs/**'
       - 'public/**'
@@ -94,3 +95,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-validation-placeholder
           SUPABASE_SERVICE_ROLE_KEY: build-validation-placeholder
         run: npm run build
+
+      - name: Run logic regression tests
+        run: npm test
+

@@ -190,7 +190,7 @@ export default function InventoryPage() {
 
   const stocktakeRows = useMemo(() => products.map((product) => ({
     ...product,
-    system: quantityFor(product.id, stocktakeLocation),
+    system: Number(balances.find(row=>row.product_id===product.id&&row.location_id===stocktakeLocation)?.quantity||0),
   })), [products, balances, stocktakeLocation])
 
   const submitStocktake = async (event) => {
@@ -396,3 +396,4 @@ export default function InventoryPage() {
     </main>
   )
 }
+

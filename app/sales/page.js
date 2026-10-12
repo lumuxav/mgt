@@ -15,6 +15,7 @@ export default function SalesPage() {
   const [permissions, setPermissions] = useState([])
   const [sales, setSales] = useState([])
   const [customers, setCustomers] = useState([])
+  const [customerBalances, setCustomerBalances] = useState([])
   const [payments, setPayments] = useState([])
   const [returns, setReturns] = useState([])
   const [tab, setTab] = useState('sales')
@@ -46,7 +47,7 @@ export default function SalesPage() {
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
 
-      const [permissionRes, salesRes, customersRes, paymentsRes, returnsRes] = await Promise.all([
+      const [permissionRes, salesRes, customersRes, paymentsRes, returnsRes, balancesRes] = await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('sales')
           .select('id,sale_number,customer_id,location_id,pricing_mode,status,payment_status,subtotal,discount_amount,tax_amount,total_amount,amount_paid,refunded_amount,notes,sold_by,created_at,customers(name,phone),locations(name)')
@@ -56,13 +57,15 @@ export default function SalesPage() {
         supabase.from('customers').select('id,name,phone,email,credit_limit,active').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('payments').select('id,customer_id,sale_id,direction,payment_type,method,amount,reference,created_at,received_by').eq('organization_id', org).order('created_at', { ascending: false }).limit(1000),
         supabase.from('sale_returns').select('id,sale_id,customer_id,return_number,total_amount,credit_reduction,cash_refund_amount,refund_method,reason,created_at').eq('organization_id', org).order('created_at', { ascending: false }).limit(300),
+        supabase.rpc('get_customer_sales_balances'),
       ])
 
-      for (const result of [permissionRes, salesRes, customersRes, paymentsRes, returnsRes]) if (result.error) throw result.error
+      for (const result of [permissionRes, salesRes, customersRes, paymentsRes, returnsRes, balancesRes]) if (result.error) throw result.error
 
       setPermissions((permissionRes.data || []).map((row) => row.permission))
       setSales(salesRes.data || [])
       setCustomers(customersRes.data || [])
+      setCustomerBalances(balancesRes.data || [])
       setPayments(paymentsRes.data || [])
       setReturns(returnsRes.data || [])
     } catch (error) {
@@ -77,29 +80,11 @@ export default function SalesPage() {
   const outstandingForSale = (sale) => Math.max(0, Number(sale.total_amount || 0) - Number(sale.refunded_amount || 0) - Number(sale.amount_paid || 0))
 
   const debtors = useMemo(() => {
-    const map = {}
-    for (const sale of sales) {
-      if (!sale.customer_id) continue
-      const due = outstandingForSale(sale)
-      if (due <= 0.009) continue
-      if (!map[sale.customer_id]) {
-        const customer = customers.find((item) => item.id === sale.customer_id)
-        map[sale.customer_id] = {
-          id: sale.customer_id,
-          name: customer?.name || sale.customers?.name || 'Customer',
-          phone: customer?.phone || sale.customers?.phone || '',
-          credit_limit: Number(customer?.credit_limit || 0),
-          owed: 0,
-          sales: 0,
-          last: sale.created_at,
-        }
-      }
-      map[sale.customer_id].owed += due
-      map[sale.customer_id].sales += 1
-      if (sale.created_at > map[sale.customer_id].last) map[sale.customer_id].last = sale.created_at
-    }
-    return Object.values(map).sort((a, b) => b.owed - a.owed)
-  }, [sales, customers])
+    return customerBalances.filter(row => Number(row.balance_due) > 0.009).map(row => ({
+      id: row.customer_id, name: row.name, phone: row.phone || '', credit_limit: Number(row.credit_limit || 0),
+      owed: Number(row.balance_due), opening_due: Number(row.opening_due), sales: Number(row.sale_count), last: row.last_sale_at,
+    })).sort((a, b) => b.owed - a.owed)
+  }, [customerBalances])
 
   const todaySales = sales.filter((sale) => sameDay(sale.created_at))
   const todayReturns = returns.filter((item) => sameDay(item.created_at))
@@ -300,12 +285,13 @@ export default function SalesPage() {
               <h2 className="text-xl font-black">{selectedCustomer.name}</h2>
               <p className="mt-2 text-3xl font-black text-red-500">{money(selectedCustomer.owed, currency)}</p>
               <p className="mt-1 text-xs text-muted">Credit limit {money(selectedCustomer.credit_limit, currency)}</p>
+              {selectedCustomer.opening_due > 0 && <p className="mt-2 text-xs text-muted">Includes opening balance {money(selectedCustomer.opening_due, currency)}</p>}
             </div>
 
             {canTakePayment && (
               <form onSubmit={recordPayment} className="page-card p-5">
                 <h3 className="font-black">Record repayment</h3>
-                <p className="mt-1 text-xs text-muted">MGT automatically applies the payment to the oldest outstanding sales first.</p>
+                <p className="mt-1 text-xs text-muted">MGT clears the opening balance first, then the oldest outstanding sales.</p>
                 <input className="input-base mt-4" required type="number" min="0.01" max={selectedCustomer.owed} step="0.01" placeholder="Amount received" value={payAmount} onChange={(event) => setPayAmount(event.target.value)} />
                 <select className="input-base mt-3" value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>
                   <option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="card">Card</option><option value="bank">Bank</option><option value="cheque">Cheque</option>
@@ -368,3 +354,4 @@ export default function SalesPage() {
     </main>
   )
 }
+

@@ -5,6 +5,7 @@ import { adminApi } from '../../lib/adminApi'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { useOnlineStatus } from '../../lib/useOnlineStatus'
+import { customerBalanceMap } from '../../lib/balances'
 
 const money=(value,currency='UGX')=>`${Number(value||0).toLocaleString()} ${currency}`
 const providerLabel=p=>p==='mtn_momo'?'MTN MoMo':p==='airtel_money'?'Airtel Money':'Payment Gateway'
@@ -23,6 +24,7 @@ export default function PaymentsPage(){
   const [transactions,setTransactions]=useState([])
   const [sales,setSales]=useState([])
   const [customers,setCustomers]=useState([])
+  const [customerBalances,setCustomerBalances]=useState([])
   const [jobs,setJobs]=useState([])
   const [invoices,setInvoices]=useState([])
   const [orders,setOrders]=useState([])
@@ -46,7 +48,7 @@ export default function PaymentsPage(){
       setContext(ctx)
       if(!ctx.organization?.id)throw new Error('Complete business setup first.')
       const org=ctx.organization.id
-      const [permissionRes,salesRes,customerRes,jobRes,invoiceRes,orderRes,connectionsRes,transactionsRes]=await Promise.all([
+      const [permissionRes,salesRes,customerRes,jobRes,invoiceRes,orderRes,connectionsRes,transactionsRes,balancesRes]=await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('sales').select('id,sale_number,customer_id,location_id,total_amount,amount_paid,refunded_amount,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(250),
         supabase.from('customers').select('id,name,phone,email,active').eq('organization_id',org).eq('active',true).order('name'),
@@ -55,8 +57,10 @@ export default function PaymentsPage(){
         supabase.from('online_orders').select('id,order_number,customer_id,location_id,total_amount,payment_status,status,customer_name,customer_phone,created_at').eq('organization_id',org).neq('status','cancelled').order('created_at',{ascending:false}).limit(250),
         adminApi('/api/payments/connections'),
         adminApi('/api/payments/transactions'),
+        supabase.rpc('get_customer_sales_balances'),
       ])
-      for(const r of [permissionRes,salesRes,customerRes,jobRes,invoiceRes,orderRes])if(r.error)throw r.error
+      for(const r of [permissionRes,salesRes,customerRes,jobRes,invoiceRes,orderRes,balancesRes])if(r.error)throw r.error
+      setCustomerBalances(balancesRes.data||[])
       setPermissions((permissionRes.data||[]).map(x=>x.permission))
       setSales(salesRes.data||[]);setCustomers(customerRes.data||[]);setJobs(jobRes.data||[]);setInvoices(invoiceRes.data||[]);setOrders(orderRes.data||[])
       if(connectionsRes.ok){
@@ -74,13 +78,8 @@ export default function PaymentsPage(){
 
   const customerMap=useMemo(()=>Object.fromEntries(customers.map(c=>[c.id,c])),[customers])
   const customerDebt=useMemo(()=>{
-    const map={}
-    for(const s of sales){
-      const due=Math.max(0,Number(s.total_amount||0)-Number(s.refunded_amount||0)-Number(s.amount_paid||0))
-      if(s.customer_id&&due>0.009)map[s.customer_id]=(map[s.customer_id]||0)+due
-    }
-    return map
-  },[sales])
+    return customerBalanceMap(customerBalances)
+  },[customerBalances])
 
   const targets=useMemo(()=>{
     const list=[]
@@ -271,3 +270,4 @@ export default function PaymentsPage(){
     </section>}
   </main>
 }
+

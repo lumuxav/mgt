@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyOrganizationPermission } from '../../../../../lib/serverAccess'
 import { checkProviderPayment } from '../../../../../lib/serverPaymentProviders'
+import { saveProviderStatus } from '../../../../../lib/serverPaymentLifecycle'
 
 async function refreshTransaction(adminClient,organizationId,transaction){
   const {data:connection,error:connectionError}=await adminClient.rpc('server_get_payment_provider_connection',{
@@ -10,7 +11,7 @@ async function refreshTransaction(adminClient,organizationId,transaction){
 
   const providerResult=await checkProviderPayment(connection,transaction)
   const completed=['succeeded','failed','cancelled','expired'].includes(providerResult.status)
-  const {data:updated,error:updateError}=await adminClient.from('external_payment_transactions').update({
+  const updated=await saveProviderStatus(adminClient,transaction,{
     status:providerResult.status,
     provider_status:providerResult.provider_status||null,
     provider_financial_id:providerResult.provider_financial_id||transaction.provider_financial_id||null,
@@ -18,8 +19,7 @@ async function refreshTransaction(adminClient,organizationId,transaction){
     response_payload:providerResult.response_payload||{},
     completed_at:completed?new Date().toISOString():transaction.completed_at,
     updated_at:new Date().toISOString(),
-  }).eq('organization_id',organizationId).eq('id',transaction.id).select('*').single()
-  if(updateError)throw updateError
+  })
 
   await adminClient.from('external_payment_events').insert({
     organization_id:organizationId,transaction_id:transaction.id,event_type:'status_checked',
@@ -82,3 +82,4 @@ export async function PATCH(req,{params}){
     return NextResponse.json({ok:true,transaction:updated,settlement})
   }catch(error){return NextResponse.json({error:error.message},{status:400})}
 }
+

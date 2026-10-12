@@ -41,7 +41,7 @@ export default function SupplierStatement(){
   })()},[id])
 
   const statement=useMemo(()=>{
-    const base=Math.max(0,Number(supplier?.opening_balance||0)-Number(supplier?.opening_balance_paid||0))
+    const base=Number(supplier?.opening_balance||0)
     const opening=base+transactions.filter(x=>key(x.date)<startDate).reduce((s,x)=>s+x.debit-x.credit,0)
     let running=opening
     const rows=transactions.filter(x=>key(x.date)>=startDate&&key(x.date)<=endDate).map(x=>{running+=x.debit-x.credit;return {...x,balance:running}})
@@ -69,3 +69,4 @@ export default function SupplierStatement(){
     </DocumentPaper>
   </main>
 }
+
