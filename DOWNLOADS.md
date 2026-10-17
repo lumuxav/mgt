@@ -11,7 +11,7 @@
 | Linux, Intel/AMD 64-bit | `MGT-Business-Suite-Linux-x64.AppImage` | Mark the file executable and open it. AppImage support/FUSE may be required by the distribution. |
 | iPhone / iPad | Browser installation | Open MGT in Safari, then **Share → Add to Home Screen → Add**. No installable IPA is published. |
 
-The release includes `SHA256SUMS.txt` to verify the downloaded files. No installer disables operating-system security checks. Browser installation is available if your device policy does not permit a package.
+The release includes `SHA256SUMS.txt` to verify the downloaded files. No installer disables operating-system security checks. Linux AppImages require working user namespaces for Chromium sandboxing; MGT refuses an unsandboxed launch. Use browser installation if your distribution or device policy does not permit the package.
 
 ## Browser installation
 

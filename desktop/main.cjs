@@ -2,6 +2,14 @@ const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron')
 const path = require('node:path')
 const { APP_URL, RELEASES_URL, isAppUrl, isExternalUrl, canRequestCamera } = require('./policy.cjs')
 
+// Some AppImage launchers add this flag on hosts without user namespaces.
+// Never open business data in an unsandboxed renderer.
+if (app.commandLine.hasSwitch('no-sandbox')) {
+  dialog.showErrorBox('MGT requires browser sandboxing', 'This computer cannot start MGT with sandboxing enabled. Use https://mgt-lake.vercel.app in your browser or ask your administrator to configure sandbox support.')
+  app.exit(1)
+}
+app.enableSandbox()
+
 let mainWindow
 let cameraAllowed = false
 const externalPrompts = new Set()

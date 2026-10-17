@@ -40,6 +40,7 @@
       "extendInfo": {"NSCameraUsageDescription": "MGT uses the camera to scan product barcodes."},
       "artifactName": "MGT-Business-Suite-macOS-${arch}.${ext}"
     },
+    "appImage": {"executableArgs": []},
     "linux": {
       "icon": "../public/icons/mgt-icon-512.png",
       "category": "Office",
