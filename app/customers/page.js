@@ -26,7 +26,7 @@ export default function Page() {
       if (error) throw error
       setRows(data || [])
     } catch (error) {
-      setMessage(isUniversalSchemaMissing(error) ? 'Universal backend not connected yet.' : error.message)
+      setMessage(isUniversalSchemaMissing(error) ? 'Business data is unavailable. Please try again or contact your administrator.' : error.message)
     } finally { setLoading(false) }
   }
 
@@ -34,7 +34,7 @@ export default function Page() {
 
   const submit = async (e) => {
     e.preventDefault()
-    if (!context?.organization?.id) return setMessage('Complete business setup on the new MGT backend first.')
+    if (!context?.organization?.id) return setMessage('Complete business setup first.')
     setSaving(true)
     setMessage('')
     try {
@@ -49,7 +49,7 @@ export default function Page() {
   }
 
   return <main className="page-wrap">
-    <div className="page-header-row"><div><p className="page-eyebrow">Universal core</p><h1 className="page-title">Customers</h1><p className="page-subtitle">Customer records, contacts, credit limits and account relationships.</p></div><Link href="/" className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold">Back</Link></div>
+    <div className="page-header-row"><div><p className="page-eyebrow">Customer management</p><h1 className="page-title">Customers</h1><p className="page-subtitle">Customer records, contacts, credit limits and account relationships.</p></div><Link href="/" className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold">Back</Link></div>
     {message && <div className="mb-4 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-3 text-sm">{message}</div>}
     <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
       <form onSubmit={submit} className="page-card h-fit p-5"><h2 className="mb-4 text-base font-black">Add Customer</h2><div className="space-y-3">

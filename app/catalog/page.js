@@ -42,7 +42,7 @@ export default function CatalogPage() {
       if (error) throw error
       setRows(data || [])
     } catch (error) {
-      setMessage(isUniversalSchemaMissing(error) ? 'Universal backend not connected yet.' : error.message)
+      setMessage(isUniversalSchemaMissing(error) ? 'Business data is unavailable. Please try again or contact your administrator.' : error.message)
     } finally {
       setLoading(false)
     }
@@ -53,7 +53,7 @@ export default function CatalogPage() {
   const save = async (event) => {
     event.preventDefault()
     if (!online) return setMessage('You are offline. Reconnect before saving a catalog item.')
-    if (!context?.organization?.id) return setMessage('Complete business setup on the new MGT backend first.')
+    if (!context?.organization?.id) return setMessage('Complete business setup first.')
     setSaving(true)
     setMessage('')
     try {
@@ -88,7 +88,7 @@ export default function CatalogPage() {
         <div>
           <p className="page-eyebrow">Catalog</p>
           <h1 className="page-title">Products & Services</h1>
-          <p className="page-subtitle">Retail, wholesale, barcode, tax and stock settings in one universal catalog.</p>
+          <p className="page-subtitle">Retail, wholesale, barcode, tax and stock settings in one catalog.</p>
         </div>
         <Link href="/pos" className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Open POS</Link>
       </div>

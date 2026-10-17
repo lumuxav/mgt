@@ -58,7 +58,7 @@ export default function SystemControlPage(){
       <div>
         <p className="page-eyebrow">System administration</p>
         <h1 className="page-title">System Control</h1>
-        <p className="page-subtitle">Monitor Universal MGT access, organizations and data integrity.</p>
+        <p className="page-subtitle">Monitor MGT access, organizations and data integrity.</p>
       </div>
       <button onClick={load} className="btn-secondary rounded-xl px-3 py-2 text-sm font-bold">Refresh</button>
     </div>
@@ -74,7 +74,7 @@ export default function SystemControlPage(){
 
     <section className="mt-7 grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
       <div>
-        <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">Requires attention</h2><span className="text-xs text-muted">Universal checks</span></div>
+        <div className="mb-3 flex items-center justify-between"><h2 className="text-lg font-black">Requires attention</h2><span className="text-xs text-muted">Business checks</span></div>
         <div className="settings-list">
           <Link href="/inventory" className="settings-row"><span className="settings-row-icon">!</span><div><strong>Negative stock</strong><p>Inventory balances below zero</p></div><span className={summary.negative_stock?'text-red-500 font-black':'text-emerald-500 font-black'}>{summary.negative_stock||0}</span></Link>
           <Link href="/sales" className="settings-row"><span className="settings-row-icon">#</span><div><strong>Broken sale references</strong><p>Sale lines whose product record cannot be found</p></div><span className={summary.orphan_sales?'text-red-500 font-black':'text-emerald-500 font-black'}>{summary.orphan_sales||0}</span></Link>

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import MgtMark from '../components/MgtMark'
 import InstallButton from '../components/InstallButton'
 
 export const metadata = { title: 'Install MGT | Mobile and desktop' }
@@ -13,15 +14,15 @@ const devices = [
 export default function InstallPage() {
   return <main className="page-wrap mx-auto max-w-4xl py-8">
     <div className="page-card p-6 sm:p-8">
+      <MgtMark className="mb-5 h-16 w-16" />
       <p className="page-eyebrow">MGT Business Suite</p>
       <h1 className="page-title">Your workspace, on any device</h1>
       <p className="mt-3 text-muted">Install MGT on your phone, tablet or computer. Sign in with the same account to access your business across devices.</p>
       <InstallButton />
       <div className="mt-6 flex flex-wrap gap-3">
         <Link href="/" className="btn-secondary rounded-xl px-4 py-2.5 font-bold">Open MGT</Link>
-        <a href="https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest" className="btn-secondary rounded-xl px-4 py-2.5 font-bold">Android test APK</a>
       </div>
-      <p className="mt-3 text-xs text-muted">APK downloads require repository access. Browser installation is available without an APK.</p>
+
     </div>
     <div className="mt-5 grid gap-4 sm:grid-cols-2">
       {devices.map(([name, instructions]) => <section key={name} className="page-card p-6">

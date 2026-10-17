@@ -227,7 +227,7 @@ export default function InventoryPage() {
       <div className="page-header-row">
         <div>
           <p className="page-eyebrow">Inventory</p>
-          <h1 className="page-title">Universal Inventory</h1>
+          <h1 className="page-title">Inventory</h1>
           <p className="page-subtitle">Stock levels, transfers, stocktakes, losses, receiving movements and valuation across all locations.</p>
         </div>
         <div className="flex gap-2">

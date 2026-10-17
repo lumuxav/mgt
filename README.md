@@ -2,7 +2,7 @@
 
 MGT Business Suite is a configurable business-management platform for retail, wholesale, distribution, services, manufacturing and hybrid businesses.
 
-The active development branch is `universal-business-platform`, which is also the repository default branch.
+The production source branch is `universal-business-platform`, which is also the repository default branch.
 
 ## Architecture
 
@@ -215,7 +215,13 @@ npm run build
 npm run lint
 ```
 
-Current verification: 75 database regressions and 33 JavaScript tests pass; the production build passes. Changed JavaScript files pass lint. Existing full-repository lint debt remains (44 errors, 19 warnings); details and physical-device limitations are recorded in the audit. SQL regression files are under `supabase/tests/` and roll back their fixtures.
+Current verification: 87 database regression checks (75 integrity checks plus 12 Intelligence checks) and 41 JavaScript tests pass; the production build passes. The new Intelligence/model/brand components pass lint. Existing lint findings remain in older pages; details and physical-device limitations are recorded in the audits. SQL regression files are under `supabase/tests/` and roll back their fixtures.
+
+## MGT Intelligence and app identity
+
+The [branding and Intelligence release notes](docs/MGT_INTELLIGENCE_AND_BRANDING.md) describe the MGT lettermark, updated mobile/desktop icons and removal of obsolete prototype copy. `/insights` offers quick business answers, permission-scoped database summaries and a learned sales forecast with chronological validation. The model runs within MGT without external AI credentials or per-query API charges. Small datasets show a history requirement instead of invented forecasts.
+
+The additional migration `20261017133647_business_intelligence_snapshot.sql` is applied to the dedicated database. It adds a read-only aggregate RPC and must precede deploying the new Intelligence page in another environment.
 
 ## Health checks
 

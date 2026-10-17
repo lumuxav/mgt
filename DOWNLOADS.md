@@ -1,6 +1,6 @@
 # MGT Business Suite — mobile and desktop apps
 
-Open [Universal MGT](https://mgt-lake.vercel.app). After deploying this revision, `/install` provides device instructions and the install button when supported. The login page links to that guide.
+Open [MGT Business Suite](https://mgt-lake.vercel.app). After deploying this revision, `/install` provides device instructions and the install button when supported. The login page links to that guide.
 
 ## Install on your device
 
@@ -38,9 +38,13 @@ Keep the keystore and passwords backed up securely. Signed packages are publishe
 
 The [iOS workflow](.github/workflows/validate-ios.yml) builds an unsigned simulator app with the camera usage description and pinned Capacitor plugins. An unsigned simulator build is not an installable iPhone package. TestFlight, physical-device and App Store distribution need Apple signing and provisioning. The Safari installation option above is available independently.
 
+## Icon and web updates
+
+This release uses the new MGT lettermark on mobile and desktop. Web changes follow the production deployment; choose **Update now** when offered. An installed PWA may retain its launcher icon until the browser refreshes the manifest; reinstalling the PWA can refresh it. Native Android/iOS launcher icons require the new package built from `assets/logo.svg`. The public install guide does not link to debug builds.
+
 ## Maintainers
 
-Capacitor tools are pinned in `package-lock.json`; use `npm ci`. The workflows generate platform projects, icons and splash assets. Native shells load the Universal HTTPS deployment; ordinary web changes become available through that deployment, while changes to plugins, permissions, signing, native configuration or packaged fallback assets require a new native build.
+Capacitor tools are pinned in `package-lock.json`; use `npm ci`. The workflows generate platform projects, icons and splash assets. Native shells load the MGT HTTPS deployment; ordinary web changes become available through that deployment, while changes to plugins, permissions, signing, native configuration or packaged fallback assets require a new native build.
 
 `server.errorPath` loads the bundled recovery page if the native shell cannot open the remote application. Camera scanning always retains manual entry. Android hardware Back navigates within the app and asks for a second press before closing at Home or Login.
 

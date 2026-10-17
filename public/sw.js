@@ -1,6 +1,6 @@
-const CACHE_NAME = 'mgt-shell-v5'
+const CACHE_NAME = 'mgt-shell-v6'
 const OFFLINE_URL = '/offline.html'
-const SHELL = [OFFLINE_URL, '/icons/icon-192.png', '/icons/icon-512.png', '/icon.svg']
+const SHELL = [OFFLINE_URL, '/icons/mgt-icon-192.png', '/icons/mgt-icon-512.png', '/icon.svg']
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)))
@@ -38,7 +38,7 @@ self.addEventListener('fetch', event => {
     return
   }
 
-  if (url.pathname.startsWith('/_next/static/') || SHELL.includes(url.pathname) || url.pathname.startsWith('/icons/')) {
+  if (url.pathname.startsWith('/_next/static/') || SHELL.includes(url.pathname) || url.pathname.startsWith('/icons/mgt-')) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME)
       const cached = await cache.match(request)

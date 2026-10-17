@@ -1,5 +1,7 @@
 'use client'
 
+import MgtMark from './MgtMark'
+
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -389,7 +391,6 @@ export default function AppShell({ children }) {
   const routePermissionDenied = !hasRoutePermission(pathname, grantedPermissions, profile?.role)
   const currentModuleLabel = currentModule ? (MODULE_LABELS[currentModule] || currentModule.replaceAll('_', ' ')) : ''
   const brandName = business.businessName || 'My Business'
-  const brandMark = business.shortName || 'MGT'
 
   if (isStandalone) return children
   if (!accessChecked && accessError) return (
@@ -406,7 +407,7 @@ export default function AppShell({ children }) {
     <div className="app-shell">
       <aside className="app-sidebar">
         <div className="app-brand">
-          <div className="app-brand-mark">{brandMark}</div>
+          <MgtMark className="h-12 w-12" />
           <div><strong>{brandName}</strong><span>{defaultLocation?.name || 'Business Management'}</span></div>
         </div>
 
@@ -451,7 +452,7 @@ export default function AppShell({ children }) {
 
       <div className="app-main">
         <header className="app-mobile-header">
-          <div className="app-mobile-brand"><div className="app-brand-mark small">{brandMark}</div><div><strong>{brandName}</strong><span>{isSuper ? 'System Administration' : defaultLocation?.name || 'Management'}</span></div></div>
+          <div className="app-mobile-brand"><MgtMark className="h-9 w-9" /><div><strong>{brandName}</strong><span>{isSuper ? 'System Administration' : defaultLocation?.name || 'Management'}</span></div></div>
           <div className="flex items-center gap-2">
             <Link href="/notifications" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full border border-[var(--line)] bg-[var(--panel)] text-[var(--text)]">
               <Icon name="alert" />

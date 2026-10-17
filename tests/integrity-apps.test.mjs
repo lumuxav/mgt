@@ -139,7 +139,7 @@ test('online business pages are never persisted and cache cleanup is scoped to M
   let activated
   h.handlers.activate({ waitUntil: promise => { activated = promise } })
   await activated
-  assert.deepEqual(h.deleted, ['mgt-shell-v4'])
+  assert.deepEqual(h.deleted, ['mgt-shell-v4', 'mgt-shell-v5'])
 })
 
 test('Android packaging emits increasing versions and a separate test app ID', async () => {

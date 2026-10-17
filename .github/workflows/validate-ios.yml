@@ -49,7 +49,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string MGT uses the camera only when you choose to scan a product barcode." "$PLIST"
 
       - name: Generate MGT iOS app icon and splash assets
-        run: npx @capacitor/assets generate --ios --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827' --splashBackgroundColor '#1f3f70' --splashBackgroundColorDark '#111827'
+        run: npx @capacitor/assets generate --ios --iconBackgroundColor '#10243a' --iconBackgroundColorDark '#10243a' --splashBackgroundColor '#10243a' --splashBackgroundColorDark '#10243a'
 
       - name: Sync Capacitor iOS project
         run: npx cap sync ios

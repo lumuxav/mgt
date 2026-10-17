@@ -1,5 +1,7 @@
 'use client'
 
+import MgtMark from '../components/MgtMark'
+
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -128,7 +130,7 @@ export default function LoginPage() {
     <main className="min-h-screen grid place-items-center px-5 py-8" style={{ background: 'var(--bg)' }}>
       <div className="w-full max-w-[390px]">
         <div className="mb-7 text-center">
-          <div className="app-brand-mark mx-auto mb-4">{business.shortName || 'MGT'}</div>
+          <MgtMark className="mx-auto mb-4 h-16 w-16" />
           <h1 className="text-2xl font-black tracking-tight">{business.businessName || 'MGT Business Suite'}</h1>
           <p className="mt-1 text-sm text-muted">Business Management Platform</p>
         </div>

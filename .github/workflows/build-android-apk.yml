@@ -94,7 +94,7 @@ jobs:
           PY
 
       - name: Generate MGT icon and splash assets
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827' --splashBackgroundColor '#1f3f70' --splashBackgroundColorDark '#111827'
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#10243a' --iconBackgroundColorDark '#10243a' --splashBackgroundColor '#10243a' --splashBackgroundColorDark '#10243a'
 
       - name: Sync Capacitor Android project
         run: npx cap sync android

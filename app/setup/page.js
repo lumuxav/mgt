@@ -342,8 +342,8 @@ export default function BusinessSetupPage() {
           </div>
 
           <div className="setup-future-note">
-            <strong>Prototype foundation</strong>
-            <p>MGT stores a local copy for fast startup and, when the new universal Supabase project is connected, also persists the organization, locations and enabled modules centrally.</p>
+            <strong>Your business, connected</strong>
+            <p>Save your business details, locations and modules to make them available to your team across devices.</p>
           </div>
 
           <button type="button" onClick={finish} disabled={saving} className="btn-primary mt-5 w-full rounded-xl px-5 py-3.5 font-black disabled:opacity-60">{saving ? 'Saving...' : saved ? 'Configuration saved ✓' : 'Save business configuration'}</button>{backendStatus && <p className="mt-3 text-center text-xs text-muted">{backendStatus}</p>}

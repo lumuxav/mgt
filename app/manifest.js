@@ -15,9 +15,9 @@ export default function manifest() {
     "productivity"
   ],
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icons/mgt-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mgt-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mgt-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     {
@@ -26,7 +26,7 @@ export default function manifest() {
       "url": "/pos",
       "icons": [
         {
-          "src": "/icon.svg",
+          "src": "/icon.svg?v=2",
           "sizes": "any",
           "type": "image/svg+xml"
         }
@@ -38,7 +38,7 @@ export default function manifest() {
       "url": "/inventory",
       "icons": [
         {
-          "src": "/icon.svg",
+          "src": "/icon.svg?v=2",
           "sizes": "any",
           "type": "image/svg+xml"
         }
@@ -50,7 +50,7 @@ export default function manifest() {
       "url": "/notifications",
       "icons": [
         {
-          "src": "/icon.svg",
+          "src": "/icon.svg?v=2",
           "sizes": "any",
           "type": "image/svg+xml"
         }
