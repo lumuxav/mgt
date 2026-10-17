@@ -2,18 +2,23 @@ name: Build Android App
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [universal-business-platform]
+    paths: ["capacitor.config.json", "mobile-shell/**", "assets/**", "scripts/configure-android.cjs", "package.json", "package-lock.json", ".github/workflows/build-android-apk.yml"]
   push:
     branches:
       - universal-business-platform
     paths:
+      - 'package.json'
+      - 'package-lock.json'
       - 'capacitor.config.json'
       - 'mobile-shell/**'
       - 'assets/logo.svg'
+      - 'scripts/configure-android.cjs'
       - '.github/workflows/build-android-apk.yml'
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   build-android:
@@ -29,19 +34,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Purge superseded completed workflow runs
-        if: contains(github.event.head_commit.message, '[purge-actions]')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?per_page=100" \
-            --jq '.workflow_runs[] | select(.status == "completed") | .id' > /tmp/mgt_old_runs.txt
-          while read -r run_id; do
-            [ -z "$run_id" ] && continue
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/$run_id" || true
-          done < /tmp/mgt_old_runs.txt
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -68,11 +60,19 @@ jobs:
       - name: Install project dependencies
         run: npm ci
 
-      - name: Install Capacitor Android packaging tools
-        run: npm install --no-save @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor/assets@3 @capacitor/keyboard@8 @capacitor/app@8
-
       - name: Create Android project
         run: npx cap add android
+
+      - name: Set upgrade version and isolate test application
+        env:
+          MGT_BUILD_NUMBER: ${{ github.run_number }}
+        run: node scripts/configure-android.cjs
+
+      - name: Restore test signing identity
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: mgt-android-test-keystore-v1
 
       - name: Enable camera access for barcode scanning
         shell: bash
@@ -94,7 +94,7 @@ jobs:
           PY
 
       - name: Generate MGT icon and splash assets
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#111827' --iconBackgroundColorDark '#111827' --splashBackgroundColor '#1f3f70' --splashBackgroundColorDark '#111827'
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#10243a' --iconBackgroundColorDark '#10243a' --splashBackgroundColor '#10243a' --splashBackgroundColorDark '#10243a'
 
       - name: Sync Capacitor Android project
         run: npx cap sync android
@@ -127,7 +127,7 @@ jobs:
           fi
 
       - name: Configure release signing
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request'
         shell: bash
         run: |
           printf '%s' "$MGT_KEYSTORE_BASE64" | base64 --decode > android/app/mgt-release.jks
@@ -151,7 +151,7 @@ jobs:
           GRADLE
 
       - name: Build signed release APK and AAB
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request'
         shell: bash
         run: |
           cd android
@@ -161,7 +161,7 @@ jobs:
           cp android/app/build/outputs/bundle/release/app-release.aab MGT-Business-Suite-Release.aab
 
       - name: Upload signed release artifacts
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: MGT-Business-Suite-Signed-Release
@@ -171,25 +171,18 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Remove superseded pre-separation stable package
-        if: contains(github.event.head_commit.message, '[clean-universal]')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete mgt-latest --cleanup-tag --yes || true
-          gh release delete mgt-test-latest --cleanup-tag --yes || true
-
       - name: Publish test APK release
+        if: github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mgt-test-latest
           name: MGT Business Suite — Latest Test APK
-          body: Direct-install Android test APK built from the isolated Universal MGT branch.
+          body: Android test APK (com.mgt.businesssuite.test). Requires a network connection. Test signing is cached; if the cache is lost, uninstall the previous test package before installing again. Production packages use the separately configured release keystore.
           files: MGT-Business-Suite-Test.apk
           make_latest: false
 
       - name: Publish signed Android release
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: mgt-latest

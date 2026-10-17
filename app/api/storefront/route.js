@@ -7,6 +7,9 @@ export const revalidate = 0
 const clean=(value,max=500)=>String(value||'').trim().slice(0,max)
 
 async function ecommerceEnabled(adminClient,organizationId){
+  const {data:organization,error:organizationError}=await adminClient.from('organizations').select('active').eq('id',organizationId).maybeSingle()
+  if(organizationError)throw organizationError
+  if(organization?.active!==true)return false
   const {data,error}=await adminClient
     .from('organization_modules')
     .select('enabled')
@@ -37,6 +40,7 @@ export async function GET(req){
       .from('storefront_products')
       .select('id,product_id,featured,title_override,description,image_url,price_override,max_per_order,sort_order')
       .eq('storefront_id',store.id)
+      .eq('organization_id',store.organization_id)
       .eq('published',true)
       .order('featured',{ascending:false})
       .order('sort_order',{ascending:true})

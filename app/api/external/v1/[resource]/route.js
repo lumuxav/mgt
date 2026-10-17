@@ -1,24 +1,14 @@
 import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { getServerClients } from '../../../../../lib/serverAccess'
+import { consumeServerRateLimit, getServerClients } from '../../../../../lib/serverAccess'
 
-const RESOURCES={
-  products:{table:'products',scope:'catalog.read',select:'id,name,sku,barcode,item_type,unit,track_inventory,cost_price,selling_price,wholesale_price,tax_rate,reorder_level,active,updated_at'},
-  customers:{table:'customers',scope:'customers.read',select:'id,name,phone,email,address,customer_group,credit_limit,active,updated_at'},
-  suppliers:{table:'suppliers',scope:'suppliers.read',select:'id,name,phone,email,address,active,updated_at'},
-  sales:{table:'sales',scope:'sales.read',select:'id,location_id,customer_id,sale_number,channel,status,payment_status,subtotal,discount_amount,tax_amount,total_amount,amount_paid,created_at,updated_at'},
-  stock:{table:'stock_balances',scope:'inventory.read',select:'product_id,location_id,quantity,reserved_quantity,updated_at'},
-  work_orders:{table:'work_orders',scope:'services.read',select:'id,job_number,location_id,customer_id,title,status,priority,quoted_amount,final_amount,amount_paid,payment_status,due_at,scheduled_at,completed_at,updated_at'},
-  projects:{table:'projects',scope:'projects.read',select:'id,project_number,location_id,customer_id,name,status,priority,start_date,due_date,progress_percent,contract_value,budget_cost,created_at,updated_at'},
-  deliveries:{table:'deliveries',scope:'fleet.read',select:'id,delivery_number,source_location_id,customer_id,sale_id,work_order_id,vehicle_id,driver_user_id,status,destination,scheduled_at,dispatched_at,delivered_at,updated_at'},
-  online_orders:{table:'online_orders',scope:'ecommerce.read',select:'id,storefront_id,location_id,customer_id,order_number,status,payment_status,payment_method,customer_name,customer_phone,fulfillment_method,subtotal,tax_amount,delivery_fee,total_amount,sale_id,delivery_id,created_at,updated_at'}
-}
+import { EXTERNAL_RESOURCES, externalResourceQuery, parsePage } from '../../../../../lib/externalApi'
 
 const sha=(value)=>crypto.createHash('sha256').update(value).digest('hex')
 
 export async function GET(req,{params}){
   const resource=(await params)?.resource
-  const def=RESOURCES[resource]
+  const def=EXTERNAL_RESOURCES[resource]
   if(!def)return NextResponse.json({error:'Unknown resource.'},{status:404,headers:{'cache-control':'no-store'}})
 
   let clients
@@ -29,7 +19,7 @@ export async function GET(req,{params}){
   const keyHash=sha(token)
   const {data:key,error:keyError}=await clients.adminClient
     .from('integration_api_keys')
-    .select('id,organization_id,scopes,active,expires_at')
+    .select('id,organization_id,scopes,active,expires_at,revoked_at')
     .eq('key_hash',keyHash)
     .maybeSingle()
   if(keyError)return NextResponse.json({error:'API authentication failed.'},{status:500})
@@ -37,22 +27,34 @@ export async function GET(req,{params}){
   if(key.expires_at&&new Date(key.expires_at)<=new Date())return NextResponse.json({error:'API key has expired.'},{status:401})
   if(!(key.scopes||[]).includes(def.scope))return NextResponse.json({error:`Missing scope: ${def.scope}`},{status:403})
 
-  const url=new URL(req.url)
-  const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||100)))
-  const offset=Math.max(0,Number(url.searchParams.get('offset')||0))
-  let query=clients.adminClient.from(def.table).select(def.select).eq('organization_id',key.organization_id).range(offset,offset+limit-1)
+  try {
+    const {data:organization,error:organizationError}=await clients.adminClient.from('organizations').select('active').eq('id',key.organization_id).maybeSingle()
+    if(organizationError)throw organizationError
+    if(organization?.active!==true)return NextResponse.json({error:'This business is not active.'},{status:403})
+    const {data:modules,error:moduleError}=await clients.adminClient.from('organization_modules')
+      .select('module_key,enabled').eq('organization_id',key.organization_id).in('module_key',['integrations',...def.modules])
+    if(moduleError)throw moduleError
+    const enabled=new Set((modules||[]).filter(row=>row.enabled).map(row=>row.module_key))
+    if(!enabled.has('integrations')||!def.modules.some(module=>enabled.has(module)))return NextResponse.json({error:'This integration or resource module is disabled.'},{status:403})
+    const rate=await consumeServerRateLimit(clients.adminClient,{scope:'external_api',key:key.id,limit:300,windowSeconds:60})
+    if(!rate.allowed)return NextResponse.json({error:'Too many API requests.'},{status:429,headers:{'Retry-After':String(rate.retry_after||60)}})
+    const page=parsePage(new URL(req.url).searchParams)
+    const {limit,offset}=page
+    const query=externalResourceQuery(clients.adminClient,resource,key.organization_id,page)
 
-  const updatedAfter=url.searchParams.get('updated_after')
-  if(updatedAfter&&['products','customers','suppliers','sales','stock','work_orders','projects','deliveries','online_orders'].includes(resource)){
-    const date=new Date(updatedAfter)
-    if(!Number.isNaN(date.getTime()))query=query.gt('updated_at',date.toISOString())
+    const {data,error}=await query
+    if(error)throw error
+    const rows=(data||[]).map(record=>{
+      if(resource!=='stock')return record
+      const row={...record}
+      delete row.products
+      return row
+    })
+    await clients.adminClient.from('integration_api_keys').update({last_used_at:new Date().toISOString()}).eq('id',key.id)
+    return NextResponse.json({ok:true,resource,count:rows.length,offset,limit,data:rows},{
+      headers:{'cache-control':'no-store','x-mgt-resource':resource}
+    })
+  } catch(error) {
+    return NextResponse.json({error:error.message},{status:400})
   }
-
-  const {data,error}=await query
-  if(error)return NextResponse.json({error:error.message},{status:400,headers:{'cache-control':'no-store'}})
-
-  await clients.adminClient.from('integration_api_keys').update({last_used_at:new Date().toISOString()}).eq('id',key.id)
-  return NextResponse.json({ok:true,resource,count:(data||[]).length,offset,limit,data:data||[]},{
-    headers:{'cache-control':'no-store','x-mgt-resource':resource}
-  })
 }

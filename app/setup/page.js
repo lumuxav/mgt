@@ -15,6 +15,7 @@ import {
   templateConfig,
 } from '../../lib/platformConfig'
 import { invalidatePlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { isSavedLocation, matchSetupLocation } from '../../lib/setupLocations'
 
 const slug = () => Math.random().toString(36).slice(2, 8)
 
@@ -54,8 +55,8 @@ export default function BusinessSetupPage() {
   }
 
   const toggleModule = (id) => {
-    const module = MODULE_CATALOG.find((item) => item.id === id)
-    if (module?.core) return
+    const definition = MODULE_CATALOG.find((item) => item.id === id)
+    if (definition?.core) return
     const next = new Set(config.enabledModules || [])
     if (next.has(id)) next.delete(id)
     else next.add(id)
@@ -72,17 +73,23 @@ export default function BusinessSetupPage() {
   }
 
   const updateLocation = (id, changes) => {
+    const locations = config.locations.map((location) => location.id === id ? { ...location, ...changes } : location)
     update({
-      locations: config.locations.map((location) => location.id === id ? { ...location, ...changes } : location),
+      locations,
+      defaultLocationId: locations.find(item => item.id === config.defaultLocationId && item.active !== false)?.id || locations.find(item => item.active !== false)?.id,
     })
   }
 
   const removeLocation = (id) => {
-    if ((config.locations || []).length <= 1) return
+    if (config.locations.filter(item => item.active !== false).length <= 1) return
+    if (isSavedLocation(config.locations.find(item => item.id === id))) {
+      updateLocation(id, { active: false })
+      return
+    }
     const locations = config.locations.filter((location) => location.id !== id)
     update({
       locations,
-      defaultLocationId: config.defaultLocationId === id ? locations[0].id : config.defaultLocationId,
+      defaultLocationId: config.defaultLocationId === id ? locations.find(item => item.active !== false).id : config.defaultLocationId,
     })
   }
 
@@ -99,6 +106,9 @@ export default function BusinessSetupPage() {
     })
 
     try {
+      if (!normalized.locations.some(item => item.active !== false)) throw new Error('Keep at least one active location.')
+      const names = normalized.locations.map(item => item.name.trim().toLowerCase())
+      if (names.some(name => !name) || new Set(names).size !== names.length) throw new Error('Give each location a unique, non-empty name.')
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) {
         const cached = saveBusinessConfig(normalized)
@@ -157,12 +167,13 @@ export default function BusinessSetupPage() {
 
       const resolvedLocations = []
       for (const location of normalized.locations) {
-        const match = (existingLocations || []).find((item) => item.name.toLowerCase() === location.name.trim().toLowerCase())
+        const match = matchSetupLocation(existingLocations || [], location)
         if (match) {
           const { data, error } = await supabase
             .from('locations')
-            .update({ type: location.type, active: location.active !== false })
+            .update({ name: location.name.trim(), type: location.type, active: location.active !== false })
             .eq('id', match.id)
+            .eq('organization_id', organizationId)
             .select('id, name, type')
             .single()
           if (error) throw error
@@ -280,8 +291,8 @@ export default function BusinessSetupPage() {
                   <label><span>Type</span><select className="input-base" value={location.type} onChange={(e) => updateLocation(location.id, { type: e.target.value })}>{LOCATION_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                 </div>
                 <div className="setup-location-actions">
-                  <label className="setup-radio"><input type="radio" name="default-location" checked={config.defaultLocationId === location.id} onChange={() => update({ defaultLocationId: location.id })} /> Default location</label>
-                  <button type="button" onClick={() => removeLocation(location.id)} disabled={config.locations.length <= 1} className="setup-remove">Remove</button>
+                  <label className="setup-radio"><input type="radio" name="default-location" disabled={location.active === false} checked={config.defaultLocationId === location.id} onChange={() => update({ defaultLocationId: location.id })} /> Default location</label>
+                  {location.active === false ? <button type="button" onClick={() => updateLocation(location.id, { active: true })} className="setup-remove">Reactivate</button> : <button type="button" onClick={() => removeLocation(location.id)} disabled={config.locations.filter(item => item.active !== false).length <= 1} className="setup-remove">{isSavedLocation(location) ? 'Deactivate' : 'Remove'}</button>}
                 </div>
               </div>
             ))}
@@ -331,8 +342,8 @@ export default function BusinessSetupPage() {
           </div>
 
           <div className="setup-future-note">
-            <strong>Prototype foundation</strong>
-            <p>MGT stores a local copy for fast startup and, when the new universal Supabase project is connected, also persists the organization, locations and enabled modules centrally.</p>
+            <strong>Your business, connected</strong>
+            <p>Save your business details, locations and modules to make them available to your team across devices.</p>
           </div>
 
           <button type="button" onClick={finish} disabled={saving} className="btn-primary mt-5 w-full rounded-xl px-5 py-3.5 font-black disabled:opacity-60">{saving ? 'Saving...' : saved ? 'Configuration saved ✓' : 'Save business configuration'}</button>{backendStatus && <p className="mt-3 text-center text-xs text-muted">{backendStatus}</p>}

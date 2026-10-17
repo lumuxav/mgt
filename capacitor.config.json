@@ -7,7 +7,8 @@
     "cleartext": false,
     "allowNavigation": [
       "mgt-lake.vercel.app"
-    ]
+    ],
+    "errorPath": "index.html"
   },
   "android": {
     "allowMixedContent": false,

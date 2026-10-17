@@ -1,7 +1,10 @@
 'use client'
 
+import MgtMark from '../components/MgtMark'
+
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { setCachedProfile, clearSessionProfileCache } from '../../lib/sessionCache'
 import { getBusinessConfig } from '../../lib/platformConfig'
@@ -17,31 +20,26 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
-    setBusiness(getBusinessConfig())
     let mounted = true
 
     const restore = async () => {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
       if (!mounted) return
+      setBusiness(getBusinessConfig())
       if (sessionError || !session) {
         setCheckingSession(false)
         return
       }
 
-      let { data: prof, error: profileError } = await supabase
+      const { data: prof, error: profileError } = await supabase
         .from('users')
-        .select('full_name, role, active, organization_id, default_location_id')
+        .select('full_name, role, active, archived_at, organization_id, default_location_id')
         .eq('id', session.user.id)
         .maybeSingle()
 
       if (!mounted) return
       if (profileError) {
-        const fallback = await supabase.from('users').select('full_name, role, branch, active').eq('id', session.user.id).maybeSingle()
-        prof = fallback.data
-        profileError = fallback.error
-      }
-
-      if (profileError) {
+        setError('Could not verify your business profile. Check your connection and try again.')
         setCheckingSession(false)
         return
       }
@@ -51,18 +49,33 @@ export default function LoginPage() {
         return
       }
 
-      if (prof.active === false) {
+      if (prof.active === false || prof.archived_at) {
         clearSessionProfileCache()
         await supabase.auth.signOut()
         setCheckingSession(false)
         return
       }
 
+      if (prof.organization_id) {
+        const access = await supabase.rpc('current_user_role')
+        if (!mounted) return
+        if (access.error || !access.data) {
+          setError(access.error ? 'Could not verify your access. Please try again.' : 'Your business or staff access is disabled. Contact management.')
+          setCheckingSession(false)
+          return
+        }
+      }
+
       setCachedProfile(session.user.id, prof)
       router.replace('/')
     }
 
-    restore()
+    restore().catch(() => {
+      if (mounted) {
+        setError('Could not restore your session. Check your connection and try again.')
+        setCheckingSession(false)
+      }
+    })
     return () => { mounted = false }
   }, [router])
 
@@ -78,22 +91,31 @@ export default function LoginPage() {
       return
     }
 
-    let { data: prof, error: profileError } = await supabase.from('users').select('full_name, role, active, organization_id, default_location_id').eq('id', data.user.id).maybeSingle()
+    const { data: prof, error: profileError } = await supabase.from('users').select('full_name, role, active, archived_at, organization_id, default_location_id').eq('id', data.user.id).maybeSingle()
     if (profileError) {
-      const fallback = await supabase.from('users').select('full_name, role, branch, active').eq('id', data.user.id).maybeSingle()
-      prof = fallback.data
-      profileError = fallback.error
+      setError('Could not verify your business profile. Check your connection and try again.')
+      setLoading(false)
+      return
     }
     if (!prof) {
       router.replace('/setup?bootstrap=1')
       return
     }
-    if (prof.active === false) {
+    if (prof.active === false || prof.archived_at) {
       setError('This account has been deactivated — contact management.')
       clearSessionProfileCache()
       await supabase.auth.signOut()
       setLoading(false)
       return
+    }
+
+    if (prof.organization_id) {
+      const access = await supabase.rpc('current_user_role')
+      if (access.error || !access.data) {
+        setError(access.error ? 'Could not verify your access. Please try again.' : 'Your business or staff access is disabled. Contact management.')
+        setLoading(false)
+        return
+      }
     }
 
     setCachedProfile(data.user.id, prof)
@@ -108,7 +130,7 @@ export default function LoginPage() {
     <main className="min-h-screen grid place-items-center px-5 py-8" style={{ background: 'var(--bg)' }}>
       <div className="w-full max-w-[390px]">
         <div className="mb-7 text-center">
-          <div className="app-brand-mark mx-auto mb-4">{business.shortName || 'MGT'}</div>
+          <MgtMark className="mx-auto mb-4 h-16 w-16" />
           <h1 className="text-2xl font-black tracking-tight">{business.businessName || 'MGT Business Suite'}</h1>
           <p className="mt-1 text-sm text-muted">Business Management Platform</p>
         </div>
@@ -141,6 +163,7 @@ export default function LoginPage() {
           <span>New business?</span>
           <button type="button" onClick={() => router.push('/onboarding')} className="font-bold text-accent">Create owner account</button>
         </div>
+        <p className="mt-4 text-center text-xs"><Link href="/install" className="font-bold text-accent">Install MGT on this device</Link></p>
       </div>
     </main>
   )

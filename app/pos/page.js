@@ -339,7 +339,7 @@ export default function PosPage() {
       <div className="page-header-row">
         <div>
           <p className="page-eyebrow">Point of Sale</p>
-          <h1 className="page-title">Universal POS</h1>
+          <h1 className="page-title">Point of Sale</h1>
           <p className="page-subtitle">Fast checkout for retail, wholesale, services and mixed businesses.</p>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -1,5 +1,7 @@
 # Universal MGT logic audit
 
+For the latest integrity, banking, access and app-installation work, see [the 17 October 2026 audit](UNIVERSAL_INTEGRITY_AND_APPS_AUDIT.md). The findings and verification counts below describe the earlier review.
+
 Review date: 12 October 2026. Source: `lumuxav/mgt`, `universal-business-platform`, starting at `35856d8`.
 
 ## Corrected behaviour

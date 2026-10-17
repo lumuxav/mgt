@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect,useRef,useState } from 'react'
+import { useEffect,useEffectEvent,useRef,useState } from 'react'
 
 const FORMATS=['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','codabar','itf','qr_code']
 
@@ -12,9 +12,10 @@ export default function BarcodeScanner({onScan,label='Scan barcode',className=''
   const [open,setOpen]=useState(false)
   const [manual,setManual]=useState('')
   const [status,setStatus]=useState('')
-  const [supported,setSupported]=useState(true)
+  const scanActive=useRef(false)
 
   const stop=()=>{
+    scanActive.current=false
     if(frameRef.current)cancelAnimationFrame(frameRef.current)
     frameRef.current=null
     if(streamRef.current){
@@ -37,10 +38,12 @@ export default function BarcodeScanner({onScan,label='Scan barcode',className=''
     onScan?.(code)
     close()
   }
+  const commitDetected = useEffectEvent(commit)
 
   useEffect(()=>{
     if(!open)return
     let cancelled=false
+    scanActive.current=true
 
     const begin=async()=>{
       try{
@@ -58,12 +61,12 @@ export default function BarcodeScanner({onScan,label='Scan barcode',className=''
           }
         }
 
-        setSupported(Boolean(detector))
+        if(cancelled||!scanActive.current)return
         const stream=await navigator.mediaDevices.getUserMedia({
           audio:false,
           video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
         })
-        if(cancelled){
+        if(cancelled||!scanActive.current){
           stream.getTracks().forEach(track=>track.stop())
           return
         }
@@ -80,19 +83,20 @@ export default function BarcodeScanner({onScan,label='Scan barcode',className=''
 
         setStatus('Point the camera at the barcode.')
         const scan=async()=>{
-          if(cancelled||!videoRef.current||!detectorRef.current)return
+          if(cancelled||!scanActive.current||!videoRef.current||!detectorRef.current)return
           try{
             if(videoRef.current.readyState>=2){
               const codes=await detectorRef.current.detect(videoRef.current)
+              if(cancelled||!scanActive.current)return
               const raw=codes?.[0]?.rawValue
-              if(raw)return commit(raw)
+              if(raw)return commitDetected(raw)
             }
           }catch{}
-          frameRef.current=requestAnimationFrame(scan)
+          if(!cancelled&&scanActive.current)frameRef.current=requestAnimationFrame(scan)
         }
         scan()
       }catch(error){
-        setSupported(false)
+        if(cancelled||!scanActive.current)return
         setStatus(error?.message||'Could not open the camera. Enter the barcode manually below.')
       }
     }
@@ -123,10 +127,10 @@ export default function BarcodeScanner({onScan,label='Scan barcode',className=''
 
         <p className="mt-3 text-xs leading-5 text-muted">{status||'Starting camera…'}</p>
 
-        {!supported&&<form className="mt-4 flex gap-2" onSubmit={event=>{event.preventDefault();commit(manual)}}>
-          <input autoFocus className="input-base" value={manual} onChange={event=>setManual(event.target.value)} placeholder="Enter barcode / SKU manually"/>
+        <form className="mt-4 flex gap-2" onSubmit={event=>{event.preventDefault();commit(manual)}}>
+          <input aria-label="Barcode or SKU" className="input-base" value={manual} onChange={event=>setManual(event.target.value)} placeholder="Enter barcode / SKU manually"/>
           <button className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Use code</button>
-        </form>}
+        </form>
       </section>
     </div>}
   </>

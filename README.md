@@ -2,27 +2,17 @@
 
 MGT Business Suite is a configurable business-management platform for retail, wholesale, distribution, services, manufacturing and hybrid businesses.
 
-The active development branch is `universal-business-platform`, which is also the repository default branch.
+The production source branch is `universal-business-platform`, which is also the repository default branch.
 
 ## Architecture
 
-```text
-Web / PWA / Android / iOS
-          ↓
-       Next.js
-          ↓
-        Vercel
-          ↓
- Supabase Auth + PostgreSQL
-          ↓
-Organization + Location isolation
-```
+The Next.js application serves browsers, installed mobile/desktop web apps and Capacitor Android/iOS shells. Vercel hosts the application; the dedicated Supabase Auth/PostgreSQL project enforces organization and location access.
 
 MGT uses dedicated application infrastructure:
 
 - Supabase project: Universal MGT
 - Vercel project: MGT
-- Android package: `com.mgt.businesssuite`
+- Signed Android package: `com.mgt.businesssuite`; test package: `com.mgt.businesssuite.test`
 - Independent PWA/native identity
 - Independent application secrets and release credentials
 
@@ -53,7 +43,7 @@ MGT uses dedicated application infrastructure:
 - integrations, API keys and signed webhooks
 - Migration Center with opening stock/balance tools
 - executive dashboard, advanced reports and MGT Intelligence
-- installable PWA and Android/iOS native packaging workflows
+- installable PWA on Android/Redmi, iPhone/iPad, Windows, Linux and Mac and Android/iOS native packaging workflows
 
 ## Business modules
 
@@ -99,7 +89,7 @@ Configuration is stored centrally in Supabase and follows the business across de
 
 ## Universal database
 
-Every business transaction is scoped by `organization_id`, and location-aware records use `location_id`.
+Business records are isolated by organization, with location-aware records also scoped to a location. Tables such as `stock_balances` derive their organization through the product relationship rather than a direct `organization_id` column.
 
 Primary entities include:
 
@@ -177,7 +167,7 @@ Examples include:
 
 Migration jobs record inserted, updated, skipped and failed rows with row-level errors and audit history.
 
-## Mobile and native
+## Mobile, desktop and native
 
 MGT supports:
 
@@ -191,11 +181,9 @@ MGT supports:
 - iPhone/iPad simulator validation
 - native safe areas, keyboard handling and back navigation
 
-The current native application ID is:
+Use `/install` for device instructions and installation when supported. The application has a standalone offline recovery screen and offers updates after the user finishes their work. Live transactions require connectivity; no offline payment queue is implemented.
 
-```text
-com.mgt.businesssuite
-```
+Desktop apps use browser installation. Native Android packages and iOS simulator validation are separate workflows. Read [DOWNLOADS.md](DOWNLOADS.md) for test/production package IDs, signing and upgrade requirements.
 
 ## Local development
 
@@ -203,7 +191,7 @@ com.mgt.businesssuite
 git clone https://github.com/lumuxav/mgt.git
 cd mgt
 git checkout universal-business-platform
-npm install
+npm ci
 npm run dev
 ```
 
@@ -216,6 +204,24 @@ SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
 Never commit secret values.
+
+## Integrity checks and recent changes
+
+The [17 October audit](docs/UNIVERSAL_INTEGRITY_AND_APPS_AUDIT.md) records business isolation, atomic role changes, financial grants, explicit bank/payment journal linkage, stock API/export corrections, and app installation improvements. Four database migrations are already applied to the dedicated Universal project; the audit lists their exact versions and deployment order.
+
+```bash
+npm test
+npm run build
+npm run lint
+```
+
+Current verification: 87 database regression checks (75 integrity checks plus 12 Intelligence checks) and 41 JavaScript tests pass; the production build passes. The new Intelligence/model/brand components pass lint. Existing lint findings remain in older pages; details and physical-device limitations are recorded in the audits. SQL regression files are under `supabase/tests/` and roll back their fixtures.
+
+## MGT Intelligence and app identity
+
+The [branding and Intelligence release notes](docs/MGT_INTELLIGENCE_AND_BRANDING.md) describe the MGT lettermark, updated mobile/desktop icons and removal of obsolete prototype copy. `/insights` offers quick business answers, permission-scoped database summaries and a learned sales forecast with chronological validation. The model runs within MGT without external AI credentials or per-query API charges. Small datasets show a history requirement instead of invented forecasts.
+
+The additional migration `20261017133647_business_intelligence_snapshot.sql` is applied to the dedicated database. It adds a read-only aggregate RPC and must precede deploying the new Intelligence page in another environment.
 
 ## Health checks
 

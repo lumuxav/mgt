@@ -109,8 +109,8 @@ export default function HomePage() {
     <main className="page-wrap">
       {!backendReady && (
         <div className="mb-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
-          <strong className="text-amber-600">Universal backend not connected yet</strong>
-          <p className="mt-1 text-sm text-muted">The MGT interface is running without an active business backend. Connect the dedicated Universal MGT Supabase project and apply the universal schema to activate live business data.</p>
+          <strong className="text-amber-600">Business data is unavailable</strong>
+          <p className="mt-1 text-sm text-muted">Check your connection and business setup, then try again. If the problem continues, contact your administrator.</p>
           <Link href="/setup" className="mt-3 inline-flex rounded-xl bg-amber-500 px-3 py-2 text-sm font-black text-slate-950">Open business setup</Link>
         </div>
       )}

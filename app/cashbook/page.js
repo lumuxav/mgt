@@ -210,7 +210,7 @@ export default function FinancePage() {
         <div>
           <p className="page-eyebrow">Finance</p>
           <h1 className="page-title">Cash, Banking & Expenses</h1>
-          <p className="page-subtitle">Universal cash movement, till control, expenses, banking and account balances.</p>
+          <p className="page-subtitle">Cash movement, till control, expenses, banking and account balances.</p>
         </div>
         <div className="flex flex-wrap gap-2"><Link href="/payments" className="btn-secondary rounded-xl px-4 py-2 text-sm font-black">External Payments</Link><Link href="/accounting" className="btn-secondary rounded-xl px-4 py-2 text-sm font-black">Accounting</Link><Link href="/sales-report" className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Reports</Link></div>
       </div>
