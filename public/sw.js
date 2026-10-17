@@ -1,59 +1,53 @@
-const CACHE_NAME='mgt-shell-v4'
-const SHELL=['/offline','/icon.svg','/manifest.webmanifest']
+const CACHE_NAME = 'mgt-shell-v5'
+const OFFLINE_URL = '/offline.html'
+const SHELL = [OFFLINE_URL, '/icons/icon-192.png', '/icons/icon-512.png', '/icon.svg']
 
-self.addEventListener('install',event=>{
-  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(SHELL)))
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)))
 })
 
-self.addEventListener('activate',event=>{
-  event.waitUntil((async()=>{
-    const keys=await caches.keys()
-    await Promise.all(keys.filter(key=>key!==CACHE_NAME).map(key=>caches.delete(key)))
-    if(self.registration.navigationPreload)await self.registration.navigationPreload.enable().catch(()=>{})
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys()
+    await Promise.all(keys.filter(key => key.startsWith('mgt-shell-') && key !== CACHE_NAME).map(key => caches.delete(key)))
+    if (self.registration.navigationPreload) await self.registration.navigationPreload.enable().catch(() => {})
     await self.clients.claim()
   })())
 })
 
-self.addEventListener('message',event=>{
-  if(event.data?.type==='SKIP_WAITING')self.skipWaiting()
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting())
 })
 
-self.addEventListener('fetch',event=>{
-  const request=event.request
-  if(request.method!=='GET')return
+self.addEventListener('fetch', event => {
+  const request = event.request
+  if (request.method !== 'GET') return
+  const url = new URL(request.url)
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return
 
-  const url=new URL(request.url)
-  if(url.origin!==self.location.origin)return
-  if(url.pathname.startsWith('/api/'))return
-
-  if(request.mode==='navigate'){
-    event.respondWith((async()=>{
-      try{
-        const preload=await event.preloadResponse
-        if(preload)return preload
-        return await fetch(request,{cache:'no-store'})
-      }catch{
-        return (await caches.match('/offline'))||Response.error()
+  // Business HTML and API responses are never cached. The offline document
+  // works without Next.js bundles or authentication.
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        return (await event.preloadResponse) || await fetch(request, { cache: 'no-store' })
+      } catch {
+        return (await (await caches.open(CACHE_NAME)).match(OFFLINE_URL)) || Response.error()
       }
     })())
     return
   }
 
-  const cacheable=url.pathname==='/icon.svg'
-    ||url.pathname==='/manifest.webmanifest'
-    ||url.pathname.startsWith('/_next/static/')
-
-  if(cacheable){
-    event.respondWith((async()=>{
-      const cache=await caches.open(CACHE_NAME)
-      const cached=await cache.match(request)
-      if(cached&&url.pathname.startsWith('/_next/static/'))return cached
-      const network=fetch(request).then(response=>{
-        if(response.ok)cache.put(request,response.clone())
-        return response
-      }).catch(()=>null)
-      return cached||(await network)||Response.error()
+  if (url.pathname.startsWith('/_next/static/') || SHELL.includes(url.pathname) || url.pathname.startsWith('/icons/')) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME)
+      const cached = await cache.match(request)
+      if (cached) return cached
+      const response = await fetch(request)
+      if (response.ok) {
+        try { await cache.put(request, response.clone()) } catch { /* Storage quota is optional. */ }
+      }
+      return response
     })())
   }
 })
-

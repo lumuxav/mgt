@@ -40,7 +40,7 @@ export const metadata = {
       { url: "/favicon.ico" },
     ],
     shortcut: "/icon.svg",
-    apple: "/icon.svg",
+    apple: "/icons/apple-touch-icon.png",
   },
 };
 

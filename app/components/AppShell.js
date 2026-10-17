@@ -106,10 +106,11 @@ export default function AppShell({ children }) {
   const [accessError, setAccessError] = useState(null)
   const [accessAttempt, setAccessAttempt] = useState(0)
   const [notificationCount,setNotificationCount] = useState(0)
-  const [mobileMenuOpen,setMobileMenuOpen] = useState(false)
-  const isStandalone = pathname === '/login' || pathname === '/setup' || pathname === '/onboarding' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname === '/accept-invite' || pathname === '/shop' || pathname.startsWith('/shop/')
-
-  useEffect(() => { setMobileMenuOpen(false) }, [pathname])
+  const [mobileMenu,setMobileMenu] = useState({ path: pathname, open: false })
+  if (mobileMenu.path !== pathname) setMobileMenu({ path: pathname, open: false })
+  const mobileMenuOpen = mobileMenu.path === pathname && mobileMenu.open
+  const setMobileMenuOpen = open => setMobileMenu({ path: pathname, open })
+  const isStandalone = pathname === '/install' || pathname === '/offline' || pathname === '/login' || pathname === '/setup' || pathname === '/onboarding' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname === '/accept-invite' || pathname === '/shop' || pathname.startsWith('/shop/')
 
   useEffect(() => {
     const sync = (event) => setBusiness(event?.detail || getBusinessConfig())

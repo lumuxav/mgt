@@ -2,10 +2,15 @@ name: Validate iOS App
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [universal-business-platform]
+    paths: ["capacitor.config.json", "mobile-shell/**", "assets/**", "package.json", "package-lock.json", ".github/workflows/validate-ios.yml"]
   push:
     branches:
       - universal-business-platform
     paths:
+      - 'package.json'
+      - 'package-lock.json'
       - 'capacitor.config.json'
       - 'mobile-shell/**'
       - 'assets/logo.svg'
@@ -32,9 +37,6 @@ jobs:
 
       - name: Install project dependencies
         run: npm ci
-
-      - name: Install iOS packaging tools
-        run: npm install --no-save @capacitor/core@8 @capacitor/cli@8 @capacitor/ios@8 @capacitor/assets@3 @capacitor/keyboard@8 @capacitor/app@8
 
       - name: Create iOS project
         run: npx cap add ios

@@ -244,6 +244,7 @@ export async function PATCH(req) {
   const { adminClient, organizationId, caller } = check
   const body = await req.json()
   const userId = body.user_id
+  if (body.active !== undefined && typeof body.active !== 'boolean') return NextResponse.json({ error: 'active must be true or false.' }, { status: 400 })
 
   if (!userId) return NextResponse.json({ error: 'User ID is required.' }, { status: 400 })
 
@@ -292,17 +293,16 @@ export async function PATCH(req) {
     changes.default_location_id = locationId
   }
 
-  if (body.active !== undefined) {
-    const active = Boolean(body.active)
-    const { error: authAccessError } = await adminClient.auth.admin.updateUserById(userId, {
-      ban_duration: active ? 'none' : '876000h',
-    })
-    if (authAccessError) return NextResponse.json({ error: authAccessError.message }, { status: 400 })
-    changes.active = active
-  }
+  if (body.active !== undefined) changes.active = body.active
 
   const { error: updateError } = await adminClient.from('users').update(changes).eq('id', userId)
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 })
+
+  let authSyncError = false
+  if (body.active !== undefined) {
+    const { error: authAccessError } = await adminClient.auth.admin.updateUserById(userId, { ban_duration: body.active ? 'none' : '876000h' })
+    authSyncError = Boolean(authAccessError)
+  }
 
   await adminClient.from('audit_log').insert({
     organization_id: organizationId,
@@ -315,6 +315,7 @@ export async function PATCH(req) {
     metadata: changes,
   })
 
+  if (authSyncError) return NextResponse.json({ error: 'Staff profile saved, but sign-in access could not be synchronized. Retry this update.', profile_saved: true }, { status: 502 })
   return NextResponse.json({ ok: true })
 }
 
@@ -348,6 +349,13 @@ export async function DELETE(req) {
   const metadata = authData?.user?.user_metadata || {}
   const archivedAt = new Date().toISOString()
 
+  const { error: profileError } = await adminClient
+    .from('users')
+    .update({ active: false, archived_at: archivedAt, updated_at: archivedAt })
+    .eq('id', userId)
+
+  if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 })
+
   const { error: authError } = await adminClient.auth.admin.updateUserById(userId, {
     ban_duration: '876000h',
     user_metadata: {
@@ -356,14 +364,6 @@ export async function DELETE(req) {
       mgt_deleted_at: archivedAt,
     },
   })
-  if (authError) return NextResponse.json({ error: authError.message }, { status: 400 })
-
-  const { error: profileError } = await adminClient
-    .from('users')
-    .update({ active: false, archived_at: archivedAt, updated_at: archivedAt })
-    .eq('id', userId)
-
-  if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 })
 
   await adminClient
     .from('staff_invitations')
@@ -383,5 +383,5 @@ export async function DELETE(req) {
     metadata: { email: target.email, role: target.role },
   })
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, ...(authError ? { warning: 'Staff access is disabled. The authentication ban could not be synchronized.' } : {}) })
 }

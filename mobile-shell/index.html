@@ -19,7 +19,7 @@
   <main>
     <div class="mark">MGT</div>
     <h1>MGT Business Suite</h1>
-    <p id="status">The native shell connects securely to the Universal MGT web application. An internet connection is required for live business data.</p>
+    <p id="status">An internet connection is required to open your business workspace. Check your connection, then open MGT.</p>
     <a id="open" href="https://mgt-lake.vercel.app">Open MGT</a>
     <script>
       const status = document.getElementById('status');
@@ -27,7 +27,7 @@
       const sync = () => {
         const online = navigator.onLine !== false;
         status.textContent = online
-          ? 'Connection available. Open MGT to continue to the live business workspace.'
+          ? 'Open MGT when your connection is ready. If the workspace does not load, check your network and try again.'
           : 'You are offline. MGT will not post sales, stock, payments or finance changes until a connection is restored.';
         open.style.opacity = online ? '1' : '.45';
         open.style.pointerEvents = online ? 'auto' : 'none';

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifyOrganizationPermission } from '../../../../../lib/serverAccess'
 import { checkProviderPayment } from '../../../../../lib/serverPaymentProviders'
-import { saveProviderStatus } from '../../../../../lib/serverPaymentLifecycle'
+import { markSettlementFailure, saveProviderStatus } from '../../../../../lib/serverPaymentLifecycle'
 
 async function refreshTransaction(adminClient,organizationId,transaction){
   const {data:connection,error:connectionError}=await adminClient.rpc('server_get_payment_provider_connection',{
@@ -30,11 +30,7 @@ async function refreshTransaction(adminClient,organizationId,transaction){
   if(updated.status==='succeeded'&&updated.settlement_status!=='settled'){
     const settled=await adminClient.rpc('server_settle_external_payment',{p_transaction_id:updated.id})
     if(settled.error){
-      await adminClient.from('external_payment_transactions').update({
-        settlement_status:'reconciliation_required',
-        settlement_result:{settled:false,error:settled.error.message},
-        updated_at:new Date().toISOString(),
-      }).eq('id',updated.id)
+      await markSettlementFailure(adminClient,updated,settled.error.message)
       settlement={settled:false,error:settled.error.message}
     }else settlement=settled.data
   }

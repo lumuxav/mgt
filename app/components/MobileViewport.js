@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { isKeyboardOpen } from '../../lib/mobileNavigation'
 
 const classifyWidth = (width) => {
   if (width < 380) return 'compact'
@@ -20,12 +21,16 @@ export default function MobileViewport() {
       const viewportHeight = visualViewport?.height || window.innerHeight
       const viewportWidth = visualViewport?.width || window.innerWidth
       const offsetTop = visualViewport?.offsetTop || 0
-      const keyboardThreshold = Math.max(120, stableHeight * 0.18)
-      const keyboardOpen = stableHeight - viewportHeight > keyboardThreshold
+      const active = document.activeElement
+      const editing = Boolean(active?.matches('input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]), textarea') || active?.isContentEditable)
+      const keyboardOpen = isKeyboardOpen({
+        stableHeight, viewportHeight, editing,
+        touch: navigator.maxTouchPoints > 0,
+        scale: visualViewport?.scale || 1,
+      })
 
-      if (!keyboardOpen && window.innerHeight >= stableHeight - 40) {
-        stableHeight = Math.max(stableHeight, window.innerHeight, viewportHeight)
-      }
+      if (!editing) stableHeight = Math.max(window.innerHeight, viewportHeight)
+      else if (!keyboardOpen) stableHeight = Math.max(stableHeight, window.innerHeight, viewportHeight)
 
       root.style.setProperty('--mgt-viewport-height', `${viewportHeight}px`)
       root.style.setProperty('--mgt-viewport-width', `${viewportWidth}px`)
@@ -46,6 +51,8 @@ export default function MobileViewport() {
     sync()
     window.addEventListener('resize', sync, { passive: true })
     window.addEventListener('orientationchange', resetAfterOrientation, { passive: true })
+    document.addEventListener('focusin', sync)
+    document.addEventListener('focusout', sync)
     visualViewport?.addEventListener('resize', sync, { passive: true })
     visualViewport?.addEventListener('scroll', sync, { passive: true })
 
@@ -53,6 +60,8 @@ export default function MobileViewport() {
       if (orientationTimer) window.clearTimeout(orientationTimer)
       window.removeEventListener('resize', sync)
       window.removeEventListener('orientationchange', resetAfterOrientation)
+      document.removeEventListener('focusin', sync)
+      document.removeEventListener('focusout', sync)
       visualViewport?.removeEventListener('resize', sync)
       visualViewport?.removeEventListener('scroll', sync)
       delete root.dataset.keyboard

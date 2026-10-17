@@ -469,3 +469,15 @@ textarea {
     border-radius: 17px;
   }
 }
+
+.mgt-update-prompt {
+  position: fixed; z-index: 120; top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right)); width: min(400px, calc(100vw - 32px));
+  border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+  background: var(--panel, #fff); color: var(--text, #14243c); box-shadow: 0 8px 32px #0002;
+}
+.mgt-back-hint {
+  position: fixed; z-index: 140; left: 50%; transform: translateX(-50%);
+  bottom: calc(24px + env(safe-area-inset-bottom)); padding: 12px 20px;
+  border-radius: 16px; background: #14243c; color: #fff; white-space: nowrap;
+}
