@@ -1,0 +1,112 @@
+name: Release MGT Apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [universal-business-platform]
+    paths:
+      - 'desktop/**'
+      - 'capacitor.config.json'
+      - 'mobile-shell/**'
+      - 'assets/**'
+      - 'public/icons/**'
+      - 'scripts/configure-android.cjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-android-apk.yml'
+      - '.github/workflows/build-desktop.yml'
+      - '.github/workflows/release-apps.yml'
+
+concurrency:
+  group: mgt-app-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    if: github.ref == 'refs/heads/universal-business-platform'
+    uses: ./.github/workflows/build-android-apk.yml
+    with:
+      release_number: ${{ format('{0}', github.run_number) }}
+    secrets: inherit
+  desktop:
+    if: github.ref == 'refs/heads/universal-business-platform'
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      release_number: ${{ format('{0}', github.run_number) }}
+  publish:
+    name: Publish all app downloads
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify required files and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          for file in MGT-Business-Suite-Test.apk MGT-Business-Suite-Windows-x64.exe MGT-Business-Suite-Linux-x64.AppImage MGT-Business-Suite-macOS-arm64.dmg MGT-Business-Suite-macOS-x64.dmg; do
+            test -s "$file"
+          done
+          sha256sum * > SHA256SUMS.txt
+      - name: Prepare release notes
+        shell: bash
+        env:
+          RELEASE_VERSION: 1.1.${{ github.run_number }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          cat > release-notes.md <<EOF
+          MGT Business Suite ${RELEASE_VERSION}
+
+          Download the file for your device from **Assets** below.
+
+          | Device | Download |
+          | --- | --- |
+          | Android / Redmi | MGT-Business-Suite-Test.apk |
+          | Windows 10/11 (64-bit Intel/AMD) | MGT-Business-Suite-Windows-x64.exe |
+          | Mac with Apple silicon | MGT-Business-Suite-macOS-arm64.dmg |
+          | Mac with Intel processor | MGT-Business-Suite-macOS-x64.dmg |
+          | Linux (64-bit Intel/AMD) | MGT-Business-Suite-Linux-x64.AppImage |
+
+          Sign in with your MGT account. An internet connection is required. These apps load https://mgt-lake.vercel.app and receive web changes from the production deployment. Desktop shell updates are installed from this release page (Help → Latest app downloads).
+
+          **Signing:** The Android Test APK uses test signing and the separate com.mgt.businesssuite.test package. Windows installers are unsigned. macOS apps have an ad-hoc signature and are not Apple-notarized; operating-system verification prompts may appear. An iPhone/iPad installation is available through Safari → Share → Add to Home Screen at https://mgt-lake.vercel.app/install. There is no installable iOS IPA in this release.
+
+          SHA256SUMS.txt contains checksums for all packages. This is a private repository; GitHub access is required for downloads. See DOWNLOADS.md for installation, upgrades and signing configuration.
+
+          Source commit: ${SOURCE_COMMIT}
+          EOF
+          if [ -s release-assets/MGT-Business-Suite-Release.apk ]; then
+            cat >> release-notes.md <<'EOF'
+
+          **Production Android packages are also included:** use MGT-Business-Suite-Release.apk for direct installation or MGT-Business-Suite-Release.aab for Google Play. These use the configured production keystore and com.mgt.businesssuite identity.
+          EOF
+          fi
+      - name: Publish versioned latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: mgt-v1.1.${{ github.run_number }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state.txt; then
+            if [ "$(cat release-state.txt)" != true ]; then
+              echo "Release already published; leaving its immutable packages unchanged."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --target "$SOURCE_COMMIT" --title "MGT Business Suite 1.1.${{ github.run_number }}" --notes-file release-notes.md --draft
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest --notes-file release-notes.md

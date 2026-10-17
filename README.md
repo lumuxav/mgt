@@ -6,7 +6,7 @@ The production source branch is `universal-business-platform`, which is also the
 
 ## Architecture
 
-The Next.js application serves browsers, installed mobile/desktop web apps and Capacitor Android/iOS shells. Vercel hosts the application; the dedicated Supabase Auth/PostgreSQL project enforces organization and location access.
+The Next.js application serves browsers, installed mobile/desktop web apps Capacitor Android/iOS shells and an Electron desktop shell. Vercel hosts the application; the dedicated Supabase Auth/PostgreSQL project enforces organization and location access.
 
 MGT uses dedicated application infrastructure:
 
@@ -179,11 +179,12 @@ MGT supports:
 - Android direct-install APK builds
 - optional signed Android APK/AAB
 - iPhone/iPad simulator validation
+- Windows installers, macOS disk images and Linux AppImages
 - native safe areas, keyboard handling and back navigation
 
 Use `/install` for device instructions and installation when supported. The application has a standalone offline recovery screen and offers updates after the user finishes their work. Live transactions require connectivity; no offline payment queue is implemented.
 
-Desktop apps use browser installation. Native Android packages and iOS simulator validation are separate workflows. Read [DOWNLOADS.md](DOWNLOADS.md) for test/production package IDs, signing and upgrade requirements.
+Download Android and desktop packages from the [latest release](https://github.com/lumuxav/mgt/releases/latest). The app release workflow builds every desktop target and Android from one commit, checks the required files, and publishes a versioned release with SHA-256 checksums. Browser installation remains available on every supported platform; iOS device distribution requires Apple signing. Read [DOWNLOADS.md](DOWNLOADS.md) for package signing and upgrade requirements, and [the sidebar and app release notes](docs/MGT_SIDEBAR_AND_RELEASES.md) for the implementation and verification record.
 
 ## Local development
 

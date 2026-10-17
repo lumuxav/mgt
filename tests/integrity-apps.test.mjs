@@ -149,9 +149,9 @@ test('Android packaging emits increasing versions and a separate test app ID', a
     await writeFile(join(path, 'android/app/build.gradle'), 'android { defaultConfig { versionCode 1\n versionName "1.0" } }')
     execFileSync(process.execPath, [new URL('../scripts/configure-android.cjs', import.meta.url).pathname], { cwd: path, env: { ...process.env, MGT_BUILD_NUMBER: '42' } })
     const gradle = await readFile(join(path, 'android/app/build.gradle'), 'utf8')
-    assert.match(gradle, /versionCode 100042/)
+    assert.match(gradle, /versionCode 200042/)
     assert.match(gradle, /applicationIdSuffix ".test"/)
-    assert.match(gradle, /versionName "1.0.42"/)
+    assert.match(gradle, /versionName "1.1.42"/)
   } finally { await rm(path, { recursive: true, force: true }) }
 })
 
