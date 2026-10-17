@@ -73,7 +73,7 @@ The build needs the Universal environment variables described in the README. Use
 
 ## Remaining limits
 
-- Desktop distribution uses an installed browser app (PWA). No Windows `.exe`, macOS `.dmg` or Linux native installer is produced.
+- At the initial audit, desktop distribution used an installed browser app (PWA). This is superseded by [MGT 1.1.1](MGT_SIDEBAR_AND_RELEASES.md), which publishes Windows `.exe`, macOS `.dmg` and Linux AppImage packages alongside Android in the latest release.
 - Android APK and unsigned iOS simulator compilation passed in GitHub Actions for code commit `00f7cc4`. Release builds require signing credentials; physical Android/Redmi/iPhone/iPad camera, keyboard and upgrade acceptance remains outstanding.
 - Business operations require connectivity. The offline screen does not implement offline sales or queue payments. Check payment history before retrying after an interrupted response.
 - Owner concurrency is serialized in SQL, but a multi-session race/load test was not performed. External payment/provider behavior still requires sandbox and real-device acceptance.

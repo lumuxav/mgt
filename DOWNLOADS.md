@@ -13,6 +13,8 @@
 
 The release includes `SHA256SUMS.txt` to verify the downloaded files. No installer disables operating-system security checks. Linux AppImages require working user namespaces for Chromium sandboxing; MGT refuses an unsandboxed launch. Use browser installation if your distribution or device policy does not permit the package.
 
+The 17 October 2026 publication is [MGT Business Suite 1.1.1](https://github.com/lumuxav/mgt/releases/tag/mgt-v1.1.1), with all five packages and checksums. Its [release workflow](https://github.com/lumuxav/mgt/actions/runs/39078141211) passed.
+
 ## Browser installation
 
 Open [MGT](https://mgt-lake.vercel.app/install). Android/Redmi Chrome and desktop Chrome/Edge offer **Install app** or the address-bar install icon. iPhone/iPad use Safari's **Add to Home Screen**; supported macOS Safari versions offer **File → Add to Dock**.

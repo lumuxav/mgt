@@ -52,3 +52,8 @@ PR #1 was merged as `5864a13d02d0a2fcc449177cb2171dabddfd2ae2` into `universal-b
 Mobile and desktop browser apps use the now-live production release. Choose **Update now** when prompted. The Capacitor app loads the same production web application; a new native installation is needed to replace its packaged launcher icon. Native physical-device acceptance remains separate from compilation and the browser checks above.
 
 Post-deployment verification used HTTPS health/HTML/manifest requests and exact icon hashes. The additional remote Chromium run was stopped at service-worker readiness behind the workspace HTTPS proxy; it is not counted as a passed live browser check. The production-build browser checks and actual database permission regressions described above passed.
+
+
+## Subsequent app publication
+
+The later [sidebar and app release](MGT_SIDEBAR_AND_RELEASES.md) was deployed and published on 17 October 2026 at 23:16 UTC. [MGT 1.1.1](https://github.com/lumuxav/mgt/releases/tag/mgt-v1.1.1) is now the GitHub latest release with Android, Windows, both Mac architectures, Linux and checksums. Use [DOWNLOADS.md](../DOWNLOADS.md) for current distribution/signing details; the earlier fixed test tag above is historical.
