@@ -1,0 +1,51 @@
+{
+  "name": "mgt-desktop",
+  "productName": "MGT Business Suite",
+  "version": "1.1.0",
+  "private": true,
+  "description": "MGT Business Suite desktop application",
+  "author": "MGT",
+  "license": "UNLICENSED",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.mgt.businesssuite.desktop",
+    "asar": true,
+    "files": ["main.cjs", "policy.cjs", "offline.html"],
+    "extraResources": [{"from": "../public/icons/mgt-icon-512.png", "to": "icon.png"}],
+    "directories": {"output": "dist"},
+    "win": {
+      "icon": "../public/icons/mgt-icon-512.png",
+      "target": [{"target": "nsis", "arch": ["x64"]}],
+      "artifactName": "MGT-Business-Suite-Windows-${arch}.${ext}"
+    },
+    "nsis": {"oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "deleteAppDataOnUninstall": false},
+    "mac": {
+      "icon": "../public/icons/mgt-icon-512.png",
+      "category": "public.app-category.business",
+      "target": ["dmg"],
+      "identity": "-",
+      "notarize": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "extendInfo": {"NSCameraUsageDescription": "MGT uses the camera to scan product barcodes."},
+      "artifactName": "MGT-Business-Suite-macOS-${arch}.${ext}"
+    },
+    "appImage": {"executableArgs": []},
+    "linux": {
+      "icon": "../public/icons/mgt-icon-512.png",
+      "category": "Office",
+      "target": ["AppImage"],
+      "artifactName": "MGT-Business-Suite-Linux-x64.${ext}"
+    }
+  }
+}

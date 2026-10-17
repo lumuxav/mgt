@@ -1,0 +1,69 @@
+name: Build Desktop Apps
+
+on:
+  pull_request:
+    branches: [universal-business-platform]
+    paths: ["desktop/**", "public/icons/**", ".github/workflows/build-desktop.yml", ".github/workflows/release-apps.yml"]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_number:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, platform: Windows, arch: x64, args: "--win --x64"}
+          - {os: ubuntu-latest, platform: Linux, arch: x64, args: "--linux --x64"}
+          - {os: macos-latest, platform: macOS, arch: arm64, args: "--mac --arm64"}
+          - {os: macos-latest, platform: macOS, arch: x64, args: "--mac --x64"}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install pinned desktop dependencies
+        run: npm ci
+      - name: Validate desktop policies
+        run: npm test
+      - name: Exercise the desktop shell
+        if: runner.os == 'Linux'
+        run: |
+          node node_modules/electron/install.js
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          xvfb-run --auto-servernum npx electron test/smoke.cjs
+      - name: Set release version
+        env:
+          MGT_RELEASE_NUMBER: ${{ inputs.release_number || github.run_number }}
+        run: node -e "const fs=require('fs');const p=require('./package.json');p.version='1.1.'+process.env.MGT_RELEASE_NUMBER;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+      - name: Package desktop application
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist -- ${{ matrix.args }}
+      - name: Upload installer
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MGT-Desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.AppImage
+            desktop/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 1

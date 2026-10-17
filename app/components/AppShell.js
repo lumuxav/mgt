@@ -411,7 +411,7 @@ export default function AppShell({ children }) {
           <div><strong>{brandName}</strong><span>{defaultLocation?.name || 'Business Management'}</span></div>
         </div>
 
-        <nav className="app-nav">
+        <nav className="app-nav" aria-label="Workspace navigation" tabIndex={0}>
           <p className="app-nav-label">Business workspace</p>
           {visibleNav.map((item) => (
             <Link key={item.href} href={item.href} className={`app-nav-item ${active(item.href) ? 'active' : ''}`}>

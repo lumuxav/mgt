@@ -20,9 +20,10 @@ export default function InstallPage() {
       <p className="mt-3 text-muted">Install MGT on your phone, tablet or computer. Sign in with the same account to access your business across devices.</p>
       <InstallButton />
       <div className="mt-6 flex flex-wrap gap-3">
+        <a href="https://github.com/lumuxav/mgt/releases/latest" target="_blank" rel="noopener noreferrer" className="btn-primary rounded-xl px-4 py-2.5 font-bold">Download mobile & desktop apps</a>
         <Link href="/" className="btn-secondary rounded-xl px-4 py-2.5 font-bold">Open MGT</Link>
       </div>
-
+      <p className="mt-3 text-sm text-muted">Choose your Android, Windows, Mac or Linux package under Assets on the latest release. GitHub repository access is required. Package signing details are included with each release.</p>
     </div>
     <div className="mt-5 grid gap-4 sm:grid-cols-2">
       {devices.map(([name, instructions]) => <section key={name} className="page-card p-6">

@@ -1,51 +1,57 @@
-# MGT Business Suite — mobile and desktop apps
+# MGT Business Suite — app downloads
 
-Open [MGT Business Suite](https://mgt-lake.vercel.app). The live [`/install` guide](https://mgt-lake.vercel.app/install) provides device instructions and the install button when supported. The login page links to that guide.
+**[Download the latest release](https://github.com/lumuxav/mgt/releases/latest)** and expand **Assets**. Android and all desktop packages are published together. This is a private repository: sign into a GitHub account with repository access to download. The in-app [installation page](https://mgt-lake.vercel.app/install) links here as well.
 
-## Install on your device
+| Device | File in the latest release | Installation |
+| --- | --- | --- |
+| Android / Redmi | `MGT-Business-Suite-Test.apk` | Download on the phone, open the APK, and allow installation from that source if prompted. It is test-signed and uses a separate app identity. |
+| Windows 10/11, Intel/AMD 64-bit | `MGT-Business-Suite-Windows-x64.exe` | Run the installer and choose the installation folder. The installer is unsigned; Windows may show an unknown-publisher warning. |
+| Mac with Apple silicon | `MGT-Business-Suite-macOS-arm64.dmg` | Open the disk image and drag MGT to Applications. It has an ad-hoc signature, without Apple notarization. |
+| Mac with Intel processor | `MGT-Business-Suite-macOS-x64.dmg` | Use the Intel image. Signing status is the same as the Apple-silicon package. |
+| Linux, Intel/AMD 64-bit | `MGT-Business-Suite-Linux-x64.AppImage` | Mark the file executable and open it. AppImage support/FUSE may be required by the distribution. |
+| iPhone / iPad | Browser installation | Open MGT in Safari, then **Share → Add to Home Screen → Add**. No installable IPA is published. |
 
-| Device | Installation |
-| --- | --- |
-| Android, including Redmi | Open MGT in Chrome and choose **Install app** / **Add to Home screen**, or use the in-app Install button. |
-| iPhone / iPad | Open MGT in Safari, then **Share → Add to Home Screen → Add**. |
-| Windows / Linux | Open MGT in Chrome or Edge and choose the address-bar install icon or the browser's Install app menu. Pin the resulting app window as desired. |
-| Mac | Install with Chrome/Edge, or choose **File → Add to Dock** in Safari on a supported macOS version. |
+The release includes `SHA256SUMS.txt` to verify the downloaded files. No installer disables operating-system security checks. Linux AppImages require working user namespaces for Chromium sandboxing; MGT refuses an unsandboxed launch. Use browser installation if your distribution or device policy does not permit the package.
 
-Browser app installation creates a standalone window and launcher icon. Desktop `.exe`/`.dmg` installers are not generated. If installation is unavailable in a browser, use the web app or a supported browser. Sign in with the same account on each device; business data and permissions are stored centrally.
+## Browser installation
 
-Stock, sales, finance and other live operations require an internet connection. The app does not queue transactions offline. Reconnect to use the workspace; check transaction history before retrying an interrupted payment. When an update is ready, finish your work and choose **Update now**.
+Open [MGT](https://mgt-lake.vercel.app/install). Android/Redmi Chrome and desktop Chrome/Edge offer **Install app** or the address-bar install icon. iPhone/iPad use Safari's **Add to Home Screen**; supported macOS Safari versions offer **File → Add to Dock**.
 
-## Android APK
+Sign in with the same MGT account across devices. Business records and permissions are stored centrally. Stock, sales and financial operations require connectivity; transactions are not queued offline. If a payment is interrupted, check its history before retrying.
 
-The [Android workflow](.github/workflows/build-android-apk.yml) generates test APK artifacts on pull requests. The production-branch build for release `5864a13` passed in [run 39057736752](https://github.com/lumuxav/mgt/actions/runs/39057736752) and updated the latest test APK on 17 October 2026 at 18:24 UTC. It includes the new MGT native icon and loads the updated production app. Signed production APK/AAB steps were skipped because the release signing configuration is incomplete; this APK remains a test-signed package. Production-branch builds publish [the latest test release](https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest). This repository is private, so GitHub downloads require repository access. Build results must be checked before relying on a release asset; older assets may predate this revision.
+## Updates
 
-- Test application ID: `com.mgt.businesssuite.test`.
-- Signed production application ID: `com.mgt.businesssuite`.
-- APK version codes increase with the workflow run number (`100000 + run_number`). Keep the workflow identity stable to preserve ordering.
-- The test keystore is cached in GitHub Actions. Cache eviction can change its signing identity, requiring removal of the previous test install. Stable production upgrades depend on the production signing key.
-- Older test builds used the production application ID. The new test package installs alongside them; confirm which icon/package you are opening. Do not remove a production install as a routine test-upgrade step.
+Web changes arrive through the production deployment. Finish work before choosing **Update now** when offered. Native icons, permissions and desktop runtime changes require installing a new package. In the desktop app, use **Help → Latest app downloads**. This private repository does not support anonymous installer downloads or automatic desktop binary updates.
 
-These existing repository secrets enable signed APK/AAB generation on the production branch:
+The desktop application opens the MGT production HTTPS origin in a sandboxed window. It provides print, zoom, save-file dialogs and a bundled connection-recovery page. External HTTPS links ask before opening in your browser. Camera barcode scanning asks for permission. It does not grant Node.js or filesystem APIs to the web application.
 
-- `MGT_ANDROID_KEYSTORE_BASE64`
-- `MGT_ANDROID_KEYSTORE_PASSWORD`
-- `MGT_ANDROID_KEY_ALIAS`
-- `MGT_ANDROID_KEY_PASSWORD`
+## Android signing and upgrades
 
-Keep the keystore and passwords backed up securely. Signed packages are published to [the stable release](https://github.com/lumuxav/mgt/releases/tag/mgt-latest) only when signing is configured. Pull-request builds do not publish releases.
+- Test application ID: `com.mgt.businesssuite.test`; production ID: `com.mgt.businesssuite`.
+- The test signing key uses the existing Actions cache `mgt-android-test-keystore-v1`. Cache eviction can change this identity and prevent upgrading an older test install. Production upgrade continuity needs the existing production key.
+- Release workflow versions use `1.1.<release run number>` and Android version codes `200000 + release run number`, above the earlier `100000 + run number` series. Keep the release workflow identity stable. Standalone validation artifacts are not release packages.
+- Old test APKs used the production application ID; the separate test application can coexist. Confirm which app you are opening rather than removing a production install.
 
-## iOS native build
+The production signing secrets are `MGT_ANDROID_KEYSTORE_BASE64`, `MGT_ANDROID_KEYSTORE_PASSWORD`, `MGT_ANDROID_KEY_ALIAS`, and `MGT_ANDROID_KEY_PASSWORD`. The workflow uses them only on the production branch. When all are configured, the same latest release also includes `MGT-Business-Suite-Release.apk` for direct installation and `MGT-Business-Suite-Release.aab` for Google Play. Never replace an existing signing key to solve an upgrade failure.
 
-The [iOS workflow](.github/workflows/validate-ios.yml) builds an unsigned simulator app with the camera usage description and pinned Capacitor plugins. An unsigned simulator build is not an installable iPhone package. TestFlight, physical-device and App Store distribution need Apple signing and provisioning. The Safari installation option above is available independently.
+The prior fixed `mgt-test-latest` tag remains historical. New packages are published under versioned `mgt-v1.1.<run number>` tags, pointing to their source commit; use `/releases/latest` to find the current release.
 
-## Icon and web updates
+## Build and publication
 
-This release uses the new MGT lettermark on mobile and desktop. Web changes follow the production deployment; choose **Update now** when offered. An installed PWA may retain its launcher icon until the browser refreshes the manifest; reinstalling the PWA can refresh it. Native Android/iOS launcher icons require the new package built from `assets/logo.svg`. The public install guide does not link to debug builds.
+[Release MGT Apps](.github/workflows/release-apps.yml) runs on production-branch changes to native/desktop code, icons, package dependencies and app build workflows, or manually on that branch. It calls the Android and desktop builds with the same version, waits for all targets, verifies required files, creates checksums, uploads into a draft, then marks the complete release **Latest**. Failed builds leave the previous release available. Re-running a published release leaves its packages unchanged.
 
-## Maintainers
+Pull requests validate packages without publishing releases. Desktop pull-request builds do not upload duplicate installers. Release-staging artifacts expire after one day; the published release assets remain available. iOS has a separate unsigned simulator validation workflow; TestFlight/App Store/device distribution requires Apple certificates and provisioning.
 
-Capacitor tools are pinned in `package-lock.json`; use `npm ci`. The workflows generate platform projects, icons and splash assets. Native shells load the MGT HTTPS deployment; ordinary web changes become available through that deployment, while changes to plugins, permissions, signing, native configuration or packaged fallback assets require a new native build.
+Local desktop commands:
 
-`server.errorPath` loads the bundled recovery page if the native shell cannot open the remote application. Camera scanning always retains manual entry. Android hardware Back navigates within the app and asks for a second press before closing at Home or Login.
+```bash
+cd desktop
+npm ci
+npm test
+npm start
+npm run dist -- --win --x64
+# On macOS: npm run dist -- --mac --arm64
+# On Linux: npm run dist -- --linux --x64
+```
 
-See [the audit and verification limits](docs/UNIVERSAL_INTEGRITY_AND_APPS_AUDIT.md) before production distribution.
+Use the matching operating system for each build. Root `npm ci` and the Android workflow generate the Capacitor project, icon and splash assets. Ordinary web updates do not need rebuilding every package. Desktop dependencies have a separate lockfile and do not increase the Vercel runtime dependency set.
