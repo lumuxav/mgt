@@ -40,3 +40,15 @@ The new SQL regression suite passes 12 checks: actual authenticated permissions,
 The production build passes. A stale local Turbopack cache initially failed to open; a fresh output directory resolved it without an application change. Live rollout and native workflow outcomes are recorded in the release notes after publishing.
 
 Browser verification passed at 360/390/768/1440 px for installation, login, icon delivery, offline recovery and reconnection. Intelligence UI checks with synthetic authenticated network fixtures passed at 390/1440 px: answers and forecast render, quick answers make no further data request, access failures clear displayed metrics, and no horizontal overflow or JavaScript exceptions occurred. Actual database access was verified separately by the rollback SQL suite.
+
+## Production rollout completed
+
+PR #1 was merged as `5864a13d02d0a2fcc449177cb2171dabddfd2ae2` into `universal-business-platform`. [Vercel production deployment](https://vercel.com/safe-heaven1/mgt/Axgi7V5AkquZLn4TZMHw2WnHh3xc) succeeded. The live `/api/health` returned release `5864a13d02d0`, `/install` returned HTTP 200 with the new branding, and all four deployed PNG icons matched the verified repository files byte for byte. Earlier preview failures did not prevent the production deployment; their underlying cause remains unconfirmed because direct Vercel team access is still denied.
+
+- [Production web validation](https://github.com/lumuxav/mgt/actions/runs/39057736749): passed.
+- [Production Android build](https://github.com/lumuxav/mgt/actions/runs/39057736752): passed and published the updated test APK to `mgt-test-latest`. Production signing/build/publish steps were skipped because signing configuration is incomplete. No production-signed APK/AAB is claimed.
+- [Production iOS simulator build](https://github.com/lumuxav/mgt/actions/runs/39057736843): passed; physical iPhone/App Store packaging still requires signing and provisioning.
+
+Mobile and desktop browser apps use the now-live production release. Choose **Update now** when prompted. The Capacitor app loads the same production web application; a new native installation is needed to replace its packaged launcher icon. Native physical-device acceptance remains separate from compilation and the browser checks above.
+
+Post-deployment verification used HTTPS health/HTML/manifest requests and exact icon hashes. The additional remote Chromium run was stopped at service-worker readiness behind the workspace HTTPS proxy; it is not counted as a passed live browser check. The production-build browser checks and actual database permission regressions described above passed.

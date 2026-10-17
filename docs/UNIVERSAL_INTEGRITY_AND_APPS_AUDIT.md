@@ -84,11 +84,13 @@ Installation and signing details: [DOWNLOADS.md](../DOWNLOADS.md). Prior account
 
 ## Repository and deployment status
 
-Code is published in [PR #1](https://github.com/lumuxav/mgt/pull/1). Its Android, iOS and web validation workflows passed on `00f7cc4`. The new test APK is available as the `MGT-Business-Suite-Test-APK` artifact on the Android run above (expires 16 November 2026); it was not published to the stable or latest-test release tags. The native shell loads the production web deployment, so the web changes in this PR become available only after that deployment is updated.
+Code is published in [PR #1](https://github.com/lumuxav/mgt/pull/1). Its Android, iOS and web validation workflows passed on `00f7cc4`. The new test APK is available as the `MGT-Business-Suite-Test-APK` artifact on the Android run above (expires 16 November 2026); it was not published to the stable or latest-test release tags. At this initial review, the web deployment was still pending; the later production rollout is recorded below.
 
-The automatic Vercel preview for `00f7cc4` failed: [deployment details](https://vercel.com/safe-heaven1/mgt/oBGsbYjsq7kAduvVPwTZ9PcpPF2f). The connected Vercel account was denied access to team `safe-heaven1` (HTTP 403), preventing inspection of its failure reason. This is separate from the successful local and GitHub production builds. The PR has not been merged and no production app deployment was promoted.
+The automatic Vercel preview for `00f7cc4` failed: [deployment details](https://vercel.com/safe-heaven1/mgt/oBGsbYjsq7kAduvVPwTZ9PcpPF2f). The connected Vercel account was denied access to team `safe-heaven1` (HTTP 403), preventing inspection of its failure reason. This is separate from the successful local and GitHub production builds. At that initial review, the PR had not been merged and no production app deployment had been promoted. This was resolved by the later production rollout below.
 
 
 ## Branding and Intelligence follow-up
 
 The [MGT release notes](MGT_INTELLIGENCE_AND_BRANDING.md) document the subsequent product branding, trained sales forecasting, quick answers, aggregate database RPC and additional validation. This earlier audit preserves its original verification and deployment timeline.
+
+Production update: PR #1 is now merged and release `5864a13` deployed successfully on Vercel. See [the completed rollout](MGT_INTELLIGENCE_AND_BRANDING.md#production-rollout-completed) for current web and native build outcomes. The earlier blocked-preview notes above are historical.

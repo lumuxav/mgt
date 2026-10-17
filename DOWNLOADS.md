@@ -1,6 +1,6 @@
 # MGT Business Suite — mobile and desktop apps
 
-Open [MGT Business Suite](https://mgt-lake.vercel.app). After deploying this revision, `/install` provides device instructions and the install button when supported. The login page links to that guide.
+Open [MGT Business Suite](https://mgt-lake.vercel.app). The live [`/install` guide](https://mgt-lake.vercel.app/install) provides device instructions and the install button when supported. The login page links to that guide.
 
 ## Install on your device
 
@@ -17,7 +17,7 @@ Stock, sales, finance and other live operations require an internet connection. 
 
 ## Android APK
 
-The [Android workflow](.github/workflows/build-android-apk.yml) generates test APK artifacts on pull requests. The 17 October audit build passed; its test APK is available under Artifacts in [run 39015415335](https://github.com/lumuxav/mgt/actions/runs/39015415335) until 16 November 2026. It loads the production web app; the web changes in PR #1 still require deployment. Production-branch builds publish [the latest test release](https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest). This repository is private, so GitHub downloads require repository access. Build results must be checked before relying on a release asset; older assets may predate this revision.
+The [Android workflow](.github/workflows/build-android-apk.yml) generates test APK artifacts on pull requests. The production-branch build for release `5864a13` passed in [run 39057736752](https://github.com/lumuxav/mgt/actions/runs/39057736752) and updated the latest test APK on 17 October 2026 at 18:24 UTC. It includes the new MGT native icon and loads the updated production app. Signed production APK/AAB steps were skipped because the release signing configuration is incomplete; this APK remains a test-signed package. Production-branch builds publish [the latest test release](https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest). This repository is private, so GitHub downloads require repository access. Build results must be checked before relying on a release asset; older assets may predate this revision.
 
 - Test application ID: `com.mgt.businesssuite.test`.
 - Signed production application ID: `com.mgt.businesssuite`.

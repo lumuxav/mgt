@@ -219,6 +219,8 @@ Current verification: 87 database regression checks (75 integrity checks plus 12
 
 ## MGT Intelligence and app identity
 
+The 17 October release is deployed at [mgt-lake.vercel.app](https://mgt-lake.vercel.app). [Install MGT on mobile or desktop](https://mgt-lake.vercel.app/install). Production web/Android/iOS build results and signing limitations are recorded in the release notes below.
+
 The [branding and Intelligence release notes](docs/MGT_INTELLIGENCE_AND_BRANDING.md) describe the MGT lettermark, updated mobile/desktop icons and removal of obsolete prototype copy. `/insights` offers quick business answers, permission-scoped database summaries and a learned sales forecast with chronological validation. The model runs within MGT without external AI credentials or per-query API charges. Small datasets show a history requirement instead of invented forecasts.
 
 The additional migration `20261017133647_business_intelligence_snapshot.sql` is applied to the dedicated database. It adds a read-only aggregate RPC and must precede deploying the new Intelligence page in another environment.
