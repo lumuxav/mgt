@@ -43,7 +43,11 @@ jobs:
         run: npm test
       - name: Exercise the desktop shell
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npx electron test/smoke.cjs
+        run: |
+          node node_modules/electron/install.js
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          xvfb-run --auto-servernum npx electron test/smoke.cjs
       - name: Set release version
         env:
           MGT_RELEASE_NUMBER: ${{ inputs.release_number || github.run_number }}

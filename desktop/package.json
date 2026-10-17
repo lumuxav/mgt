@@ -44,7 +44,7 @@
       "icon": "../public/icons/mgt-icon-512.png",
       "category": "Office",
       "target": ["AppImage"],
-      "artifactName": "MGT-Business-Suite-Linux-${arch}.${ext}"
+      "artifactName": "MGT-Business-Suite-Linux-x64.${ext}"
     }
   }
 }
