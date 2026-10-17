@@ -52,7 +52,10 @@ Financial-history fields are deliberately immutable through direct browser write
 | Browser assets | Manifest, all advertised PNG icons and Apple touch icon served successfully |
 | Browser service worker | Offline deep-link fallback, reconnection and exclusion of business HTML/API responses from Cache Storage verified |
 | Login navigation | Public install guide reachable without signing in |
-| Android project | Generated and synchronized with locked App and Keyboard plugins; packaging script checked |
+| Android project | Generated and synchronized; 74 native icon/splash assets generated |
+| GitHub web validation | Passed, [run 39015415316](https://github.com/lumuxav/mgt/actions/runs/39015415316) |
+| Android APK compilation | Passed, [run 39015415335](https://github.com/lumuxav/mgt/actions/runs/39015415335); downloadable test APK artifact |
+| iOS simulator compilation | Passed, [run 39015415340](https://github.com/lumuxav/mgt/actions/runs/39015415340) |
 
 SQL fixtures run inside `BEGIN`/`ROLLBACK`. The new suite uses the actual `authenticated` and `service_role` database roles to check grants and RLS, and verifies permitted transaction paths as well as rejected writes. No test users, organizations or financial records remain. The browser checks use public pages and build-only placeholder credentials, not genuine customer sessions. No provider collection or invitation email was initiated.
 
@@ -71,10 +74,16 @@ The build needs the Universal environment variables described in the README. Use
 ## Remaining limits
 
 - Desktop distribution uses an installed browser app (PWA). No Windows `.exe`, macOS `.dmg` or Linux native installer is produced.
-- Android APK compilation and iOS simulator compilation are covered by repository workflows. This Linux audit environment does not provide the Android SDK or Xcode. Release builds require signing credentials; physical Android/Redmi/iPhone/iPad camera, keyboard and upgrade acceptance remains outstanding.
+- Android APK and unsigned iOS simulator compilation passed in GitHub Actions for code commit `00f7cc4`. Release builds require signing credentials; physical Android/Redmi/iPhone/iPad camera, keyboard and upgrade acceptance remains outstanding.
 - Business operations require connectivity. The offline screen does not implement offline sales or queue payments. Check payment history before retrying after an interrupted response.
 - Owner concurrency is serialized in SQL, but a multi-session race/load test was not performed. External payment/provider behavior still requires sandbox and real-device acceptance.
 - Setup still saves organization, locations and modules through successive requests. A later failure is shown and a retry is supported; this flow is not a single database transaction.
 - Supabase advisors report existing `pg_net` placement, 96 executable authenticated transaction RPCs, and disabled leaked-password protection. The RPC warnings require permission-aware review, not blanket removal of the business API. Performance advisors report 82 uncovered foreign keys, 19 RLS initialization warnings, 8 overlapping-policy warnings and 153 currently unused indexes. No broad index deletion or project-level Auth configuration changes were made.
 
 Installation and signing details: [DOWNLOADS.md](../DOWNLOADS.md). Prior accounting/stock work: [UNIVERSAL_LOGIC_AUDIT.md](UNIVERSAL_LOGIC_AUDIT.md).
+
+## Repository and deployment status
+
+Code is published in [PR #1](https://github.com/lumuxav/mgt/pull/1). Its Android, iOS and web validation workflows passed on `00f7cc4`. The new test APK is available as the `MGT-Business-Suite-Test-APK` artifact on the Android run above (expires 16 November 2026); it was not published to the stable or latest-test release tags. The native shell loads the production web deployment, so the web changes in this PR become available only after that deployment is updated.
+
+The automatic Vercel preview for `00f7cc4` failed: [deployment details](https://vercel.com/safe-heaven1/mgt/oBGsbYjsq7kAduvVPwTZ9PcpPF2f). The connected Vercel account was denied access to team `safe-heaven1` (HTTP 403), preventing inspection of its failure reason. This is separate from the successful local and GitHub production builds. The PR has not been merged and no production app deployment was promoted.

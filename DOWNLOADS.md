@@ -17,7 +17,7 @@ Stock, sales, finance and other live operations require an internet connection. 
 
 ## Android APK
 
-The [Android workflow](.github/workflows/build-android-apk.yml) generates test APK artifacts on pull requests. Production-branch builds publish [the latest test release](https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest). This repository is private, so GitHub downloads require repository access. Build results must be checked before relying on a release asset; older assets may predate this revision.
+The [Android workflow](.github/workflows/build-android-apk.yml) generates test APK artifacts on pull requests. The 17 October audit build passed; its test APK is available under Artifacts in [run 39015415335](https://github.com/lumuxav/mgt/actions/runs/39015415335) until 16 November 2026. It loads the production web app; the web changes in PR #1 still require deployment. Production-branch builds publish [the latest test release](https://github.com/lumuxav/mgt/releases/tag/mgt-test-latest). This repository is private, so GitHub downloads require repository access. Build results must be checked before relying on a release asset; older assets may predate this revision.
 
 - Test application ID: `com.mgt.businesssuite.test`.
 - Signed production application ID: `com.mgt.businesssuite`.
