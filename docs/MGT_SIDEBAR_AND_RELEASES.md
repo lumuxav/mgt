@@ -17,6 +17,7 @@ No database schema or records are changed by this update.
 ## Verification record
 
 Desktop policy regressions cover origin spoofing, unsafe URL protocols, subframe camera requests and microphone denial. A real Electron smoke test in Linux CI covers launch, renderer isolation, internal navigation, local-file/popup blocking, connection recovery and retry using synthetic pages. Browser checks cover the full navigation at short desktop heights, independent wheel/keyboard scrolling and mobile menu scrolling. 
+- A clean local Next.js production build passes (58 pages).
 - 41 existing JavaScript regression tests pass.
 - 3 desktop URL/permission policy tests pass.
 - Browser fixtures pass at 1366×640, 1024×400 and 1440×900: wheel and Page Down scroll the sidebar independently; the final menu link and account card are visible.
