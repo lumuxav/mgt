@@ -108,7 +108,7 @@ jobs:
           name: MGT-Business-Suite-Test-APK
           path: MGT-Business-Suite-Test.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
 
       - name: Detect Android signing configuration
         id: signing
@@ -163,5 +163,5 @@ jobs:
             MGT-Business-Suite-Release.apk
             MGT-Business-Suite-Release.aab
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 1
 

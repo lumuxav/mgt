@@ -40,7 +40,7 @@ The prior fixed `mgt-test-latest` tag remains historical. New packages are publi
 
 [Release MGT Apps](.github/workflows/release-apps.yml) runs on production-branch changes to native/desktop code, icons, package dependencies and app build workflows, or manually on that branch. It calls the Android and desktop builds with the same version, waits for all targets, verifies required files, creates checksums, uploads into a draft, then marks the complete release **Latest**. Failed builds leave the previous release available. Re-running a published release leaves its packages unchanged.
 
-Pull requests build packages as temporary Actions artifacts without publishing. iOS has a separate unsigned simulator validation workflow; TestFlight/App Store/device distribution requires Apple certificates and provisioning.
+Pull requests validate packages without publishing releases. Desktop pull-request builds do not upload duplicate installers. Release-staging artifacts expire after one day; the published release assets remain available. iOS has a separate unsigned simulator validation workflow; TestFlight/App Store/device distribution requires Apple certificates and provisioning.
 
 Local desktop commands:
 
