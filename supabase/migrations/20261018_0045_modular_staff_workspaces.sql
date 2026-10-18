@@ -439,3 +439,54 @@ create trigger mgt_seed_new_business_job_roles
 after insert on public.organizations for each row
 execute function public.mgt_seed_new_business_job_roles();
 revoke all on function public.mgt_seed_new_business_job_roles() from public,anon,authenticated;
+
+-- Assigned project progress is an explicit work permission, not just membership.
+CREATE OR REPLACE FUNCTION public.update_project_task(p_task_id uuid, p_status text, p_progress_percent numeric DEFAULT NULL::numeric, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_task public.project_tasks%rowtype;
+ v_progress numeric(5,2);
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='projects' and enabled)
+ then raise exception 'Projects module is not enabled'; end if;
+ if p_status not in ('todo','in_progress','blocked','completed','cancelled') then raise exception 'Invalid task status'; end if;
+
+ select * into v_task from public.project_tasks where id=p_task_id and organization_id=v_org for update;
+ if not found then raise exception 'Task not found'; end if;
+
+ if not (
+  public.has_permission('projects.manage')
+  or (public.has_permission('projects.time') and v_task.assigned_user_id=auth.uid())
+ ) then raise exception 'You can only update tasks assigned to you'; end if;
+
+ v_progress:=coalesce(p_progress_percent,v_task.progress_percent);
+ if v_progress<0 or v_progress>100 then raise exception 'Progress must be between 0 and 100'; end if;
+ if p_status='completed' then v_progress:=100; end if;
+
+ update public.project_tasks set
+  status=p_status,progress_percent=v_progress,notes=coalesce(p_notes,notes),
+  completed_at=case when p_status='completed' then coalesce(completed_at,now()) else null end,
+  updated_at=now()
+ where id=v_task.id;
+
+ update public.projects p set
+  progress_percent=coalesce((
+    select round(avg(t.progress_percent),2)
+    from public.project_tasks t
+    where t.project_id=p.id and t.status<>'cancelled'
+  ),p.progress_percent),
+  updated_at=now()
+ where p.id=v_task.project_id;
+
+ insert into public.project_events(organization_id,project_id,event_type,description,metadata,user_id)
+ values(v_org,v_task.project_id,'task_status',v_task.title,
+  jsonb_build_object('task_id',v_task.id,'from_status',v_task.status,'to_status',p_status,'progress_percent',v_progress),auth.uid());
+
+ return jsonb_build_object('task_id',v_task.id,'status',p_status,'progress_percent',v_progress);
+end; $function$;
