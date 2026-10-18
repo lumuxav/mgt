@@ -18,8 +18,8 @@ export default function MyWorkPage(){
 
   const load=async()=>{
     try{
-      setFailure('')
       const ctx=await getPlatformContext({force:true})
+      setFailure('')
       if(!ctx?.organization?.id)throw new Error('You need an active business workspace.')
       const [work,permissions]=await Promise.all([
         supabase.rpc('mgt_my_work'),supabase.rpc('current_permissions')
