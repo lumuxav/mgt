@@ -104,8 +104,8 @@ export default function HomePage() {
   const initials = useMemo(() => (profile?.full_name || 'User').split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase(), [profile])
 
   const quickActions = [
-    can('workspace.tasks') && ['/my-work', 'My Work', 'Assigned tasks, service jobs and attendance', '✓'],
     can('users.manage') && ['/users', 'Staff & Access', 'Manage business staff and privileges', '♧'],
+    can('workspace.tasks') && ['/my-work', 'My Work', 'Assigned tasks, service jobs and attendance', '✓'],
     moduleEnabled(business, 'insights') && can('insights.view') && ['/insights', 'MGT Intelligence', 'Forecasts and quick business answers', '✦'],
     moduleEnabled(business, 'pos') && can('sales.create') && ['/pos', 'New POS sale', 'Fast counter checkout', '+'],
     moduleEnabled(business, 'sales') && can('sales.view') && ['/sales', 'Sales & credit', 'Receipts, debt and returns', '▤'],
