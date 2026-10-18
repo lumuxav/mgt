@@ -34,7 +34,7 @@ try{
   const authCalls=[]
   const failedRequests=[]
   page.on('requestfailed',request=>failedRequests.push({
-    url:request.url().replace(/\\?.*/,''),error:request.failure()?.errorText||'network error'
+    url:request.url().split('?')[0],error:request.failure()?.errorText||'network error'
   }))
   page.on('response',response=>{
     if(response.url().includes('/auth/v1/') || response.url().includes('/rest/v1/') || response.url().includes('/rpc/')) {
@@ -46,7 +46,7 @@ try{
    // Next.js may server-render the fields before React registers onChange.
    // Filling inputs before hydration causes signInWithPassword('','') without any HTTP request.
    await page.waitForFunction(()=>Boolean(document.querySelector('#email')?._valueTracker)
-       && Boolean(document.querySelector('#password')?._valueTracker),{timeout:deadline})
+       && Boolean(document.querySelector('#password')?._valueTracker),undefined,{timeout:deadline})
    await page.locator('#email').fill(fixture.accounts[role].email)
    await page.locator('#password').fill(fixture.accounts[role].password)
    await page.getByRole('button',{name:'Sign in',exact:true}).click()
