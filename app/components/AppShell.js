@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase'
 import { setCachedProfile, clearSessionProfileCache, isSigningOut, signOutAndRedirect } from '../../lib/sessionCache'
 import { getPlatformContext, invalidatePlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
 import { hasRoutePermission } from '../../lib/routeAccess'
+import { MODULE_CATEGORIES } from '../../lib/workspaceCatalog'
 import { loadNotificationInbox, notificationCategoryEnabled, syncNotificationSystem } from '../../lib/notifications'
 import {
   PLATFORM_CONFIG_EVENT,
@@ -390,6 +391,10 @@ export default function AppShell({ children }) {
     : grantedPermissions.includes(permission))
   const visibleNav = NAV.filter((item) => moduleEnabled(business, item.module) && hasPermission(item.permission))
   const visibleManagement = MANAGEMENT.filter((item) => moduleEnabled(business, item.module) && hasPermission(item.permission))
+  const personalNavigation = visibleNav.filter(item=>item.href==='/'||!item.module)
+  const moduleNavigation = MODULE_CATEGORIES.map(category=>({
+    ...category,items:visibleNav.filter(item=>item.href!=='/' && item.module && category.modules.includes(item.module))
+  })).filter(category=>category.items.length>0)
   const mobilePrimary = [
     { href: '/', label: 'Home', icon: 'home', module: 'dashboard', permission: 'dashboard.view' },
   { href: '/my-work', label: 'My Work', icon: 'service', permission: 'workspace.tasks' },
@@ -423,12 +428,21 @@ export default function AppShell({ children }) {
         </div>
 
         <nav className="app-nav" aria-label="Workspace navigation" tabIndex={0}>
-          <p className="app-nav-label">Business workspace</p>
-          {visibleNav.map((item) => (
-            <Link key={item.href} href={item.href} className={`app-nav-item ${active(item.href) ? 'active' : ''}`}>
-              <Icon name={item.icon} /><span>{item.label}</span>
-              {item.href==='/notifications'&&notificationCount>0&&<span className="ml-auto rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-black text-white">{notificationCount>99?'99+':notificationCount}</span>}
+          <p className="app-nav-label">Personal workspace</p>
+          {personalNavigation.map(item=>(
+            <Link key={item.href} href={item.href} className={`app-nav-item ${active(item.href)?'active':''}`}>
+              <Icon name={item.icon}/><span>{item.label}</span>
             </Link>
+          ))}
+          {moduleNavigation.map(category=>(
+            <div key={category.id}>
+              <p className="app-nav-label app-nav-label-spaced">{category.name}</p>
+              {category.items.map(item=>(
+                <Link key={item.href} href={item.href} className={`app-nav-item ${active(item.href)?'active':''}`}>
+                  <Icon name={item.icon}/><span>{item.label}</span>
+                </Link>
+              ))}
+            </div>
           ))}
 
           <p className="app-nav-label app-nav-label-spaced">Management</p>
@@ -509,11 +523,19 @@ export default function AppShell({ children }) {
           </div>
 
           <div className="mobile-nav-section">
-            <p className="app-nav-label">Business workspace</p>
+            <p className="app-nav-label">Personal workspace</p>
             <div className="mobile-nav-grid">
-              {visibleNav.map(item=><Link key={item.href} href={item.href} onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span></Link>)}
+              {personalNavigation.map(item=><Link key={item.href} href={item.href} onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span></Link>)}
             </div>
           </div>
+          {moduleNavigation.map(category=>(
+            <div key={category.id} className="mobile-nav-section">
+              <p className="app-nav-label">{category.name}</p>
+              <div className="mobile-nav-grid">
+                {category.items.map(item=><Link key={item.href} href={item.href} onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span></Link>)}
+              </div>
+            </div>
+          ))}
 
           <div className="mobile-nav-section">
             <p className="app-nav-label">Management</p>
