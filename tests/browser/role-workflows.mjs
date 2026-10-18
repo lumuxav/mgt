@@ -32,6 +32,10 @@ try{
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   const authCalls=[]
+  const failedRequests=[]
+  page.on('requestfailed',request=>failedRequests.push({
+    url:request.url().replace(/\\?.*/,''),error:request.failure()?.errorText||'network error'
+  }))
   page.on('response',response=>{
     if(response.url().includes('/auth/v1/') || response.url().includes('/rest/v1/') || response.url().includes('/rpc/')) {
       if(response.status()>=400)authCalls.push({status:response.status(),url:response.url().replace(/\?.*/,'')})
@@ -39,6 +43,10 @@ try{
   })
   try{
    await page.goto(base+'/login',{waitUntil:'domcontentloaded',timeout:deadline})
+   // Next.js may server-render the fields before React registers onChange.
+   // Filling inputs before hydration causes signInWithPassword('','') without any HTTP request.
+   await page.waitForFunction(()=>Boolean(document.querySelector('#email')?._valueTracker)
+       && Boolean(document.querySelector('#password')?._valueTracker),{timeout:deadline})
    await page.locator('#email').fill(fixture.accounts[role].email)
    await page.locator('#password').fill(fixture.accounts[role].password)
    await page.getByRole('button',{name:'Sign in',exact:true}).click()
@@ -68,7 +76,7 @@ try{
    console.log('PASS browser '+role+' auth, work area, primary module and restricted pages')
   }catch(e){
     const body=(await page.locator('body').innerText().catch(()=>''))?.slice(0,950)
-    failures.push({role,error:e.message.slice(0,450),url:page.url(),screen:body,requests:authCalls,jsErrors:errors.slice(0,4)})
+    failures.push({role,error:e.message.slice(0,450),url:page.url(),screen:body,requests:authCalls,networkFailures:failedRequests.slice(0,5),jsErrors:errors.slice(0,4)})
     console.log('DIAGNOSTIC '+role+': '+JSON.stringify(failures[failures.length-1]))
     await page.screenshot({path:'/tmp/mgt-browser-failure-'+role+'.png',fullPage:true}).catch(()=>{})
     console.log('FAIL browser '+role+': '+e.message.slice(0,1100))
