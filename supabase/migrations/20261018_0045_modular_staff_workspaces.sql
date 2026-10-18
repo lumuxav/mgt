@@ -2,7 +2,8 @@
 -- Existing roles and customized owner grants are never overwritten.
 insert into public.permission_catalog(code,section,label,description,sort_order) values
 ('services.assigned','Operations','Work on assigned service jobs','See and update only service jobs assigned to this user',93),
-('workspace.tasks','Workspace','View own work dashboard','Personal tasks and attendance dashboard',11)
+('workspace.tasks','Workspace','View own work dashboard','Personal tasks and attendance dashboard',11),
+('fleet.assigned','Assets & Fleet','Complete assigned deliveries','Update only delivery trips allocated to your account',66)
 on conflict (code) do nothing;
 
 -- Role combination permissions are additive; primary roles remain unchanged.
@@ -74,7 +75,7 @@ $$;
 create or replace function public.mgt_my_work()
 returns jsonb language plpgsql stable security definer set search_path=public as $$
 declare v_org uuid:=public.current_organization_id(); v_me uuid:=auth.uid();
- v_tasks jsonb:='[]'::jsonb; v_jobs jsonb:='[]'::jsonb;
+ v_tasks jsonb:='[]'::jsonb; v_jobs jsonb:='[]'::jsonb; v_deliveries jsonb:='[]'::jsonb;
  v_attendance jsonb:='{}'::jsonb; v_tz text;
 begin
  if v_org is null or v_me is null then raise exception 'Active staff account required'; end if;
@@ -97,13 +98,23 @@ begin
     and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true)
     and w.status not in ('cancelled','completed');
  end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='fleet' and enabled)
+    and (public.has_permission('fleet.assigned') or public.has_permission('fleet.dispatch')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',d.id,'number',d.delivery_number,'destination',d.destination,'status',d.status,
+      'scheduled_at',d.scheduled_at,'contact_name',d.contact_name,'contact_phone',d.contact_phone
+    ) order by d.scheduled_at nulls last),'[]'::jsonb) into v_deliveries
+    from public.deliveries d where d.organization_id=v_org and d.driver_user_id=v_me
+    and d.status not in ('delivered','failed','cancelled')
+    and public.mgt_record_scope_allows(v_org,d.source_location_id,d.driver_user_id,true);
+ end if;
  if public.has_permission('attendance.use') then
     select timezone into v_tz from public.organizations where id=v_org;
     select coalesce(jsonb_build_object('check_in',a.check_in,'check_out',a.check_out,'date',a.work_date),'{}'::jsonb)
     into v_attendance from public.attendance a where a.organization_id=v_org and a.user_id=v_me
       and a.work_date=(now() at time zone coalesce(v_tz,'UTC'))::date limit 1;
  end if;
- return jsonb_build_object('tasks',v_tasks,'jobs',v_jobs,'attendance',coalesce(v_attendance,'{}'::jsonb));
+ return jsonb_build_object('tasks',v_tasks,'jobs',v_jobs,'deliveries',v_deliveries,'attendance',coalesce(v_attendance,'{}'::jsonb));
 end; $$;
 revoke all on function public.mgt_my_work() from public,anon;
 grant execute on function public.mgt_my_work() to authenticated,service_role;
@@ -394,7 +405,7 @@ select role_key,permission_code from (values
  ('hr_officer','attendance.use'),('hr_officer','attendance.manage'),
  ('hr_officer','leave.request'),('hr_officer','leave.manage'),
  ('hr_officer','payroll.view'),('hr_officer','payroll.manage'),
- ('delivery_driver','dashboard.view'),('delivery_driver','fleet.dispatch'),
+ ('delivery_driver','dashboard.view'),('delivery_driver','fleet.assigned'),
  ('delivery_driver','fleet.view'),('delivery_driver','attendance.use'),
  ('project_worker','dashboard.view'),('project_worker','projects.time'),
  ('branch_manager','dashboard.view'),('branch_manager','sales.view'),
@@ -490,3 +501,47 @@ begin
 
  return jsonb_build_object('task_id',v_task.id,'status',p_status,'progress_percent',v_progress);
 end; $function$;
+
+-- Drivers may only submit progress for their own dispatched trips.
+-- This deliberately does not grant fleet.dispatch (which can create trips).
+create or replace function public.mgt_update_assigned_delivery(
+ p_delivery_id uuid,p_status text,p_recipient_name text default null,p_notes text default null,
+ p_failure_reason text default null
+) returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_org uuid:=public.current_organization_id();v_me uuid:=auth.uid();v_d public.deliveries%rowtype;
+begin
+ if v_org is null or not public.has_permission('fleet.assigned')
+ then raise exception 'Permission denied: assigned delivery'; end if;
+ if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='fleet' and enabled)
+ then raise exception 'Fleet module is not enabled'; end if;
+ if p_status not in ('in_transit','delivered','failed') then raise exception 'Invalid driver delivery status'; end if;
+ select * into v_d from public.deliveries d
+ where d.id=p_delivery_id and d.organization_id=v_org and d.driver_user_id=v_me
+ and public.mgt_record_scope_allows(v_org,d.source_location_id,d.driver_user_id,true)
+ for update;
+ if not found then raise exception 'This delivery is not assigned to you'; end if;
+ if v_d.status not in ('dispatched','in_transit') then
+   raise exception 'Only dispatched, open deliveries can be updated by a driver'; end if;
+ if p_status='delivered' and nullif(trim(coalesce(p_recipient_name,'')),'') is null
+ then raise exception 'Recipient name is required as proof of delivery'; end if;
+ if p_status='failed' and nullif(trim(coalesce(p_failure_reason,'')),'') is null
+ then raise exception 'Reason for unsuccessful delivery is required'; end if;
+ update public.deliveries set status=p_status,
+    dispatched_at=coalesce(dispatched_at,now()),
+    delivered_at=case when p_status='delivered' then now() else delivered_at end,
+    recipient_name=case when p_status='delivered' then trim(p_recipient_name) else recipient_name end,
+    failure_reason=case when p_status='failed' then trim(p_failure_reason) else failure_reason end,
+    delivery_notes=case when nullif(trim(coalesce(p_notes,'')),'') is null then delivery_notes else trim(p_notes) end,
+    updated_at=now()
+ where id=v_d.id and organization_id=v_org;
+ if v_d.vehicle_id is not null then
+   update public.vehicles set status=case when p_status='in_transit' then 'in_transit' else 'available' end,
+     updated_at=now() where id=v_d.vehicle_id and organization_id=v_org and status<>'maintenance';
+ end if;
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(v_org,v_d.source_location_id,v_me,'assigned_delivery_updated','delivery',v_d.id::text,
+ v_d.delivery_number,jsonb_build_object('from_status',v_d.status,'to_status',p_status));
+ return jsonb_build_object('delivery_id',v_d.id,'status',p_status);
+end; $$;
+revoke all on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) from public,anon;
+grant execute on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) to authenticated,service_role;
