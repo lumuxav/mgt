@@ -27,7 +27,8 @@ export default function HomePage() {
   })
   const [backendReady, setBackendReady] = useState(true)
   const [loading, setLoading] = useState(true)
-  const [canOpenIntelligence, setCanOpenIntelligence] = useState(false)
+  const [permissions, setPermissions] = useState([])
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -48,21 +49,24 @@ export default function HomePage() {
         const start = `${today}T00:00:00.000Z`
         const end = `${today}T23:59:59.999Z`
 
-        const [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes, permissionRes] = await Promise.all([
-          supabase.from('sales').select('id,total_amount,amount_paid,refunded_amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end),
-          supabase.from('sales').select('total_amount,amount_paid,refunded_amount').eq('organization_id', orgId).in('payment_status', ['partial', 'credit']),
-          supabase.from('products').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('active', true),
-          supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('active', true),
-          supabase.from('expenses').select('amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end),
-          supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['draft', 'ordered', 'partial']),
-          supabase.from('work_orders').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['open', 'in_progress']),
-          supabase.rpc('current_permissions'),
+        const { data: rows, error: permissionError } = await supabase.rpc('current_permissions')
+        if (permissionError) throw permissionError
+        const grants = new Set((rows || []).map(row => row.permission))
+        setPermissions([...grants])
+        const accessible = (permission, query) => grants.has(permission) ? query() : Promise.resolve({ data: [], count: 0, error: null })
+        const [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes] = await Promise.all([
+          accessible('sales.view', () => supabase.from('sales').select('id,total_amount,amount_paid,refunded_amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end)),
+          accessible('sales.view', () => supabase.from('sales').select('total_amount,amount_paid,refunded_amount').eq('organization_id', orgId).in('payment_status', ['partial', 'credit'])),
+          accessible('catalog.view', () => supabase.from('products').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('active', true)),
+          accessible('customers.view', () => supabase.from('customers').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('active', true)),
+          accessible('finance.view', () => supabase.from('expenses').select('amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end)),
+          accessible('purchasing.view', () => supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['draft', 'ordered', 'partial'])),
+          accessible('services.view', () => supabase.from('work_orders').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['open', 'in_progress'])),
         ])
 
         const fatal = [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes].find((r) => r.error)
         if (fatal?.error) throw fatal.error
 
-        setCanOpenIntelligence(!permissionRes.error && (permissionRes.data || []).some((row) => row.permission === 'insights.view'))
         const sales = salesRes.data || []
         setMetrics({
           salesToday: sales.length,
@@ -75,6 +79,8 @@ export default function HomePage() {
           openWorkOrders: workOrdersRes.count || 0,
         })
       } catch (error) {
+        setPermissions([])
+        setLoadError(error?.message || 'Could not verify access to this business.')
         if (isUniversalSchemaMissing(error) || String(error?.message || '').includes('organization_id')) {
           setBackendReady(false)
         }
@@ -94,28 +100,30 @@ export default function HomePage() {
       }
     : business
   const location = context?.location || getDefaultLocation(business)
+  const can = (permission) => permissions.includes(permission)
   const initials = useMemo(() => (profile?.full_name || 'User').split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase(), [profile])
 
   const quickActions = [
-    moduleEnabled(business, 'insights') && canOpenIntelligence && ['/insights', 'MGT Intelligence', 'Forecasts and quick business answers', '✦'],
-    moduleEnabled(business, 'pos') && ['/pos', 'New POS sale', 'Fast counter checkout', '+'],
-    moduleEnabled(business, 'sales') && ['/sales', 'Sales & credit', 'Receipts, debt and returns', '▤'],
-    moduleEnabled(business, 'inventory') && ['/catalog', 'Add product', 'Manage products and services', '□'],
-    moduleEnabled(business, 'customers') && ['/customers', 'Add customer', 'Customer records and credit', '◎'],
-    moduleEnabled(business, 'purchasing') && ['/purchasing', 'New purchase', 'Order or receive stock', '↓'],
-    moduleEnabled(business, 'manufacturing') && ['/production', 'Production', 'Plan or record output', '⚙'],
-    moduleEnabled(business, 'services') && ['/work-orders', 'New job', 'Create a service work order', '⌁'],
+    moduleEnabled(business, 'insights') && can('insights.view') && ['/insights', 'MGT Intelligence', 'Forecasts and quick business answers', '✦'],
+    moduleEnabled(business, 'pos') && can('sales.create') && ['/pos', 'New POS sale', 'Fast counter checkout', '+'],
+    moduleEnabled(business, 'sales') && can('sales.view') && ['/sales', 'Sales & credit', 'Receipts, debt and returns', '▤'],
+    moduleEnabled(business, 'inventory') && can('catalog.manage') && ['/catalog', 'Add product', 'Manage products and services', '□'],
+    moduleEnabled(business, 'customers') && can('customers.manage') && ['/customers', 'Add customer', 'Customer records and credit', '◎'],
+    moduleEnabled(business, 'purchasing') && can('purchasing.create') && ['/purchasing', 'New purchase', 'Order or receive stock', '↓'],
+    moduleEnabled(business, 'manufacturing') && can('manufacturing.manage') && ['/production', 'Production', 'Plan or record output', '⚙'],
+    moduleEnabled(business, 'services') && can('services.manage') && ['/work-orders', 'New job', 'Create a service work order', '⌁'],
+    can('users.manage') && ['/users', 'Staff & Access', 'Manage business staff and privileges', '♧'],
   ].filter(Boolean).slice(0, 4)
 
   if (loading) return <main className="page-wrap text-muted">Opening business workspace...</main>
 
   return (
     <main className="page-wrap">
-      {!backendReady && (
+      {(!backendReady || loadError) && (
         <div className="mb-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
           <strong className="text-amber-600">Business data is unavailable</strong>
           <p className="mt-1 text-sm text-muted">Check your connection and business setup, then try again. If the problem continues, contact your administrator.</p>
-          <Link href="/setup" className="mt-3 inline-flex rounded-xl bg-amber-500 px-3 py-2 text-sm font-black text-slate-950">Open business setup</Link>
+          {can('settings.manage') && <Link href="/setup" className="mt-3 inline-flex rounded-xl bg-amber-500 px-3 py-2 text-sm font-black text-slate-950">Open business setup</Link>}
         </div>
       )}
 
@@ -129,7 +137,7 @@ export default function HomePage() {
               <Link key={href + label} href={href} className="home-quick-action">
                 <span>{icon}</span><div><strong>{label}</strong><small>{description}</small></div>
               </Link>
-            )) : <Link href="/setup" className="home-quick-action"><span>+</span><div><strong>Configure modules</strong><small>Choose what this business needs</small></div></Link>}
+            )) : can('settings.manage') ? <Link href="/setup" className="home-quick-action"><span>+</span><div><strong>Configure modules</strong><small>Choose what this business needs</small></div></Link> : <span className="text-sm text-muted">No quick actions assigned to your role.</span>}
           </div>
         </div>
 
@@ -138,33 +146,33 @@ export default function HomePage() {
           <div className="home-profile-name">{profile?.full_name || 'Business user'}</div>
           <div className="home-profile-role">{profile?.role?.replaceAll('_', ' ') || 'user'}</div>
           <div className="home-profile-stats">
-            <div><strong>{metrics.salesToday}</strong><span>Sales today</span></div>
-            <div><strong>{metrics.products}</strong><span>Active catalog items</span></div>
-            <div><strong>{metrics.customers}</strong><span>Customers</span></div>
+            {can('sales.view') && <div><strong>{metrics.salesToday}</strong><span>Sales today</span></div>}
+            {can('catalog.view') && <div><strong>{metrics.products}</strong><span>Active catalog items</span></div>}
+            {can('customers.view') && <div><strong>{metrics.customers}</strong><span>Customers</span></div>}
           </div>
           <span className="home-profile-note">Profile changes are managed in Settings</span>
         </section>
       </section>
 
       <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Link href="/sales" className="page-card p-5"><p className="text-sm text-muted">Cash / payments today</p><p className="metric-value-success mt-3 text-3xl font-black">{money(metrics.revenueToday, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">{metrics.salesToday} sale(s) recorded</p></Link>
-        <Link href="/customers" className="page-card p-5"><p className="text-sm text-muted">Outstanding receivables</p><p className="metric-value-danger mt-3 text-3xl font-black">{money(metrics.outstanding, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">Customer credit still due</p></Link>
-        <Link href="/purchasing" className="page-card p-5"><p className="text-sm text-muted">Open purchases</p><p className="metric-value-warning mt-3 text-3xl font-black">{metrics.openPurchases}</p><p className="mt-2 text-xs text-muted">Draft, ordered or partially received</p></Link>
-        <Link href="/cashbook" className="page-card p-5"><p className="text-sm text-muted">Expenses today</p><p className="mt-3 text-3xl font-black">{money(metrics.expensesToday, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">Recorded business expenses</p></Link>
+        {can('sales.view') && <Link href="/sales" className="page-card p-5"><p className="text-sm text-muted">Cash / payments today</p><p className="metric-value-success mt-3 text-3xl font-black">{money(metrics.revenueToday, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">{metrics.salesToday} sale(s) recorded</p></Link>}
+        {can('sales.view') && <Link href="/customers" className="page-card p-5"><p className="text-sm text-muted">Outstanding receivables</p><p className="metric-value-danger mt-3 text-3xl font-black">{money(metrics.outstanding, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">Customer credit still due</p></Link>}
+        {can('purchasing.view') && <Link href="/purchasing" className="page-card p-5"><p className="text-sm text-muted">Open purchases</p><p className="metric-value-warning mt-3 text-3xl font-black">{metrics.openPurchases}</p><p className="mt-2 text-xs text-muted">Draft, ordered or partially received</p></Link>}
+        {can('finance.view') && <Link href="/cashbook" className="page-card p-5"><p className="text-sm text-muted">Expenses today</p><p className="mt-3 text-3xl font-black">{money(metrics.expensesToday, effectiveBusiness.currency)}</p><p className="mt-2 text-xs text-muted">Recorded business expenses</p></Link>}
       </section>
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[1.3fr_.7fr]">
         <div className="page-card p-5">
-          <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-lg font-black">Business modules</h2><p className="mt-1 text-xs text-muted">Your workspace adapts to the modules enabled for this business.</p></div><Link href="/setup" className="text-sm font-bold text-accent">Manage</Link></div>
+          <div className="mb-4 flex items-center justify-between gap-3"><div><h2 className="text-lg font-black">Business modules</h2><p className="mt-1 text-xs text-muted">Your workspace adapts to the modules enabled for this business.</p></div>{can('settings.manage') && <Link href="/setup" className="text-sm font-bold text-accent">Manage</Link>}</div>
           <div className="grid gap-3 sm:grid-cols-2">
             {[
-              ['inventory','Inventory','Products, stock and locations','/catalog'],
-              ['customers','Customers','CRM, balances and history','/customers'],
-              ['suppliers','Suppliers','Vendors and purchase relationships','/suppliers'],
-              ['services','Services','Jobs and work orders','/work-orders'],
-              ['manufacturing','Manufacturing','BOMs and production','/production'],
-              ['finance','Finance','Cash, expenses and banking','/cashbook'],
-            ].filter(([module]) => moduleEnabled(business, module)).map(([module,label,description,href]) => (
+              ['inventory','Inventory','Products, stock and locations','/catalog','catalog.view'],
+              ['customers','Customers','CRM, balances and history','/customers','customers.view'],
+              ['suppliers','Suppliers','Vendors and purchase relationships','/suppliers','suppliers.view'],
+              ['services','Services','Jobs and work orders','/work-orders','services.view'],
+              ['manufacturing','Manufacturing','BOMs and production','/production','manufacturing.view'],
+              ['finance','Finance','Cash, expenses and banking','/cashbook','finance.view'],
+            ].filter(([module,,,,permission]) => moduleEnabled(business, module) && can(permission)).map(([module,label,description,href]) => (
               <Link href={href} key={module} className="rounded-2xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
                 <strong>{label}</strong><p className="mt-1 text-xs text-muted">{description}</p>
               </Link>
@@ -180,7 +188,7 @@ export default function HomePage() {
             <div className="flex justify-between gap-4"><span className="text-muted">Currency</span><strong>{effectiveBusiness.currency}</strong></div>
             <div className="flex justify-between gap-4"><span className="text-muted">Business type</span><strong className="capitalize">{business.businessType?.replaceAll('_',' ')}</strong></div>
           </div>
-          <div className="mt-5 grid gap-2"><Link href="/executive-dashboard" className="btn-primary block rounded-xl px-4 py-3 text-center text-sm font-bold">Open executive dashboard</Link><Link href="/locations" className="btn-secondary block rounded-xl px-4 py-3 text-center text-sm font-bold">Manage locations</Link></div>
+          <div className="mt-5 grid gap-2">{can('reports.view') && <Link href="/executive-dashboard" className="btn-primary block rounded-xl px-4 py-3 text-center text-sm font-bold">Open executive dashboard</Link>}{can('locations.manage') && <Link href="/locations" className="btn-secondary block rounded-xl px-4 py-3 text-center text-sm font-bold">Manage locations</Link>}{can('users.manage') && <Link href="/users" className="btn-secondary block rounded-xl px-4 py-3 text-center text-sm font-bold">Staff & Access</Link>}</div>
         </div>
       </section>
     </main>
