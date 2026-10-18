@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { adminApi } from '../../lib/adminApi'
 import { getBusinessConfig } from '../../lib/platformConfig'
-import { ROLE_TEMPLATES, modulePermissionMap, visibleModulesForRole } from '../../lib/workspaceCatalog'
+import { ROLE_TEMPLATES, visibleModulesForRole } from '../../lib/workspaceCatalog'
 
 const prettyDate = (value) => value ? new Date(value).toLocaleString() : 'Never'
 const prettyRole = (key, roles) => roles.find((role) => role.key === key)?.name || String(key || 'Employee').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -27,7 +27,6 @@ export default function UsersPage() {
   const [invite, setInvite] = useState({ full_name: '', email: '', role: 'employee', default_location_id: '' })
   const [newRole, setNewRole] = useState({ name: '', description: '', template: '' })
   const [staffAccessDrafts, setStaffAccessDrafts] = useState({})
-  const [previewRoleKey,setPreviewRoleKey] = useState('')
 
   const callUsers = (method = 'GET', body) => adminApi('/api/admin/users', {
     method,

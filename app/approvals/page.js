@@ -30,7 +30,7 @@ export default function ApprovalsPage(){
 
   const currency=context?.organization?.currency||business.currency||'UGX'
   const canManage=permissions.includes('approvals.manage')
-  const canConfigure=permissions.includes('settings.manage')
+  const canConfigure=context?.user?.role==='owner'
 
   const load=async()=>{
     setLoading(true)

@@ -98,6 +98,22 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: build-validation-placeholder
         run: npm run build
 
+      - name: Check modular workforce SQL grammar
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check "pglast>=6,<9"
+          python - <<'PY'
+          from pathlib import Path
+          from pglast import parse_sql
+          path = Path("supabase/migrations/20261018_0045_modular_staff_workspaces.sql")
+          parse_sql(path.read_text())
+          print(f"PostgreSQL SQL grammar validated: {path}")
+          PY
+
+      - name: Lint new workforce modules
+        run: npx eslint app/my-work/page.js app/api/admin/staff-work-access/route.js lib/workspaceCatalog.js
+
       - name: Run logic regression tests
         run: npm test
 
