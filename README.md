@@ -253,3 +253,8 @@ Before a production release:
 MGT signup explicitly redirects confirmation emails to `https://mgt-lake.vercel.app/login` and password recovery to `https://mgt-lake.vercel.app/reset-password`. Keep Supabase email confirmation, existing owner bootstrap and role checks enabled. In Supabase project `mehuiivevjqmwvaapbgz`, **Authentication → URL Configuration**, set the Site URL to `https://mgt-lake.vercel.app` and allow the exact MGT login and reset-password redirect paths. Check any custom email templates for hard-coded Vercel login links. Supabase's default email sender has strict limits; configure verified custom SMTP before sustained public signups. Signup errors caused by email quotas are not Vercel or database outages.
 
 See [owner account guidance](docs/MGT_OWNER_AUTH_AND_BRAND.md). The approved orange-growth MGT icon is supplied separately and must replace launcher, website, mobile and desktop assets together before publication of the next release.
+
+
+### Approved October icon rollout
+
+The production icon is the project owner's approved orange rising-arrow MGT artwork. Favicons, PWA icons, branded app screens, Android Capacitor assets and Electron installer icons are updated together. The next published release should contain identical artwork, with native packages rebuilt from the same commit. Supabase Auth settings still require provider-side confirmation for email redirects and production SMTP capacity.

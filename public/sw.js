@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mgt-shell-v6'
+const CACHE_NAME = 'mgt-shell-v7'
 const OFFLINE_URL = '/offline.html'
 const SHELL = [OFFLINE_URL, '/icons/mgt-icon-192.png', '/icons/mgt-icon-512.png', '/icon.svg']
 

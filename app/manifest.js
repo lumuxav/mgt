@@ -8,7 +8,7 @@ export default function manifest() {
   "scope": "/",
   "display": "standalone",
   "background_color": "#f4f6fa",
-  "theme_color": "#1f4f8f",
+  "theme_color": "#101820",
   "orientation": "any",
   "categories": [
     "business",
@@ -26,7 +26,7 @@ export default function manifest() {
       "url": "/pos",
       "icons": [
         {
-          "src": "/icon.svg?v=2",
+          "src": "/icons/mgt-icon-192.png?v=3",
           "sizes": "any",
           "type": "image/svg+xml"
         }
@@ -38,7 +38,7 @@ export default function manifest() {
       "url": "/inventory",
       "icons": [
         {
-          "src": "/icon.svg?v=2",
+          "src": "/icons/mgt-icon-192.png?v=3",
           "sizes": "any",
           "type": "image/svg+xml"
         }
@@ -50,7 +50,7 @@ export default function manifest() {
       "url": "/notifications",
       "icons": [
         {
-          "src": "/icon.svg?v=2",
+          "src": "/icons/mgt-icon-192.png?v=3",
           "sizes": "any",
           "type": "image/svg+xml"
         }

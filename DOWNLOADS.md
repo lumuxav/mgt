@@ -62,3 +62,6 @@ Use the matching operating system for each build. Root `npm ci` and the Android 
 ## Next MGT icon and signup release
 
 The exact approved MGT icon must be used for browser favicons, PWA tiles, Android launcher/splash and all desktop installers. Native icon changes require new packages. Email confirmations require the canonical MGT redirect URLs and appropriate Supabase Auth dashboard settings; see [docs/MGT_OWNER_AUTH_AND_BRAND.md](docs/MGT_OWNER_AUTH_AND_BRAND.md). Test-signed APKs and unsigned desktop packages retain their existing distribution limitations.
+
+
+The approved October icon refresh is included in the coordinated native release. Install updated app packages to refresh Android/desktop launcher artwork. An older PWA may require uninstalling and reinstalling for an operating-system-cached launcher icon.
