@@ -137,7 +137,9 @@ begin
  perform set_config('request.jwt.claims',jsonb_build_object('sub',member,'role','authenticated')::text,true);
  if public.has_permission('sales.create') then raise exception 'Disabled role retained privileges'; end if;
  insert into audit_results(test) values('Disabled role loses permissions');
- perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
+ -- Staff status updates are service-only since the privilege escalation guard.
+ -- This simulates the validated management endpoint rather than an unsafe browser write.
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','service_role')::text,true);
  update public.users set archived_at=clock_timestamp() where id=member;
  perform set_config('request.jwt.claims',jsonb_build_object('sub',member,'role','authenticated')::text,true);
  if public.current_organization_id() is not null then raise exception 'Archived account retained organization access'; end if;
