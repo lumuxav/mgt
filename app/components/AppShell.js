@@ -39,6 +39,7 @@ const Icon = ({ name }) => {
 
 const NAV = [
   { href: '/', label: 'Home', icon: 'home', module: 'dashboard', permission: 'dashboard.view' },
+  { href: '/my-work', label: 'My Work', icon: 'service', permission: 'workspace.tasks' },
   { href: '/catalog', label: 'Catalog', icon: 'stock', module: 'inventory', permission: 'catalog.view' },
   { href: '/inventory', label: 'Inventory', icon: 'stock', module: 'inventory', permission: 'inventory.view' },
   { href: '/pos', label: 'Point of Sale', icon: 'cash', module: 'pos', permission: 'sales.create' },
@@ -391,6 +392,7 @@ export default function AppShell({ children }) {
   const visibleManagement = MANAGEMENT.filter((item) => moduleEnabled(business, item.module) && hasPermission(item.permission))
   const mobilePrimary = [
     { href: '/', label: 'Home', icon: 'home', module: 'dashboard', permission: 'dashboard.view' },
+  { href: '/my-work', label: 'My Work', icon: 'service', permission: 'workspace.tasks' },
     { href: '/pos', label: 'POS', icon: 'cash', module: 'pos', permission: 'sales.create' },
     { href: '/inventory', label: 'Stock', icon: 'stock', module: 'inventory', permission: 'inventory.view' },
     { href: '/sales', label: 'Sales', icon: 'sales', module: 'sales', permission: 'sales.view' },
