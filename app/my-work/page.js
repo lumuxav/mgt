@@ -61,6 +61,16 @@ export default function MyWorkPage(){
     enable('fleet')&&can('fleet.dispatch')&&['/fleet','Dispatch','Delivery operations'],
     enable('projects')&&can('projects.time')&&['/projects','Timesheets','Submit project hours'],
     enable('hr')&&(can('leave.request')||can('hr.view'))&&['/hr','Attendance and leave','Manage your work records'],
+    enable('finance')&&can('finance.view')&&['/cashbook','Cash and finance','Manage authorized transactions'],
+    enable('finance')&&can('accounting.view')&&['/accounting','Accounting','Ledgers and reconciliation'],
+    enable('reports')&&can('reports.view')&&['/sales-report','Business reports','Reporting for your role'],
+    enable('customers')&&can('customers.view')&&['/customers','Customers','Customer records'],
+    enable('suppliers')&&can('suppliers.view')&&['/suppliers','Suppliers','Supplier information'],
+    enable('assets')&&can('assets.view')&&['/assets','Maintenance and assets','Assigned equipment work'],
+    enable('ecommerce')&&can('ecommerce.orders')&&['/ecommerce','Online orders','E-commerce fulfilment'],
+    enable('alerts')&&can('approvals.view')&&['/approvals','Approvals','Review permitted requests'],
+    enable('documents')&&can('documents.view')&&['/documents','Business documents','Documents and records'],
+    enable('insights')&&can('insights.view')&&['/insights','Business Intelligence','Management insights'],
     can('users.manage')&&['/users','Staff & Access','Manage employees and roles'],
   ].filter(Boolean)
   if(loading)return <main className="page-wrap text-muted">Preparing your workspace...</main>
