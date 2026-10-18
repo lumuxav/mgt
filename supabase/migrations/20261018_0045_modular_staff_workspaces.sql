@@ -94,6 +94,7 @@ begin
     ) order by w.due_at nulls last),'[]'::jsonb) into v_jobs
     from public.work_orders w where w.organization_id=v_org
     and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
+    and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true)
     and w.status not in ('cancelled','completed');
  end if;
  if public.has_permission('attendance.use') then
@@ -118,7 +119,8 @@ begin
  then raise exception 'Services module not enabled'; end if;
  if p_status not in ('in_progress','on_hold') then raise exception 'Unsupported job progress action'; end if;
  select w.status into v_previous from public.work_orders w where w.id=p_work_order_id and w.organization_id=v_org
- and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me)) for update;
+ and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
+ and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true) for update;
  if not found then raise exception 'Job is not assigned to you'; end if;
  if v_previous not in ('open','scheduled','in_progress','on_hold') then raise exception 'This job cannot be updated'; end if;
  update public.work_orders set status=p_status,
