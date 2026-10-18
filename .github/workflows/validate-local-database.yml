@@ -24,6 +24,23 @@ jobs:
           version: latest
       - name: Initialize local-only database configuration
         run: supabase init --yes
+      - name: Assign unique test-only migration timestamps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          paths = sorted(Path('supabase/migrations').glob('*.sql'))
+          assert len(paths) >= 45, 'MGT migration history is unexpectedly incomplete'
+          # Earlier MGT migrations have YYYYMMDD_XXXX filenames. Supabase CLI
+          # treats all such files on one day as the same migration version.
+          # Rename ONLY the disposable checkout copies, preserving strict order.
+          for index, path in enumerate(paths):
+              target = path.with_name(f'20261018{index:06d}_mgt_ci_{index:03d}.sql')
+              assert not target.exists()
+              path.rename(target)
+          print(f'Assigned unique local-only versions to {len(paths)} migrations')
+          PY
       - name: Rebuild schema and replay all MGT SQL migrations locally
         run: supabase db start
       - name: Validate actual PostgreSQL objects and permissions
