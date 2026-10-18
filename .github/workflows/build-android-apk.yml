@@ -87,6 +87,11 @@ jobs:
               path.write_text(text)
           PY
 
+      - name: Prepare padded round Android launcher icon
+        run: |
+          python -m pip install 'Pillow==11.3.0'
+          python scripts/generate-mgt-round-icons.py --android
+
       - name: Generate MGT icon and splash assets
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#10243a' --iconBackgroundColorDark '#10243a' --splashBackgroundColor '#10243a' --splashBackgroundColorDark '#10243a'
 

@@ -123,11 +123,11 @@ export default function LoginPage() {
   }
 
   if (checkingSession) {
-    return <main className="min-h-screen grid place-items-center px-5 py-8 text-muted" style={{ background: 'var(--bg)' }}>Opening {business.businessName || 'MGT Business Suite'}...</main>
+    return <main className="mgt-standalone-safe-page min-h-screen grid place-items-center px-5 py-8 text-muted" style={{ background: 'var(--bg)' }}>Opening {business.businessName || 'MGT Business Suite'}...</main>
   }
 
   return (
-    <main className="min-h-screen grid place-items-center px-5 py-8" style={{ background: 'var(--bg)' }}>
+    <main className="mgt-standalone-safe-page min-h-screen grid place-items-center px-5 py-8" style={{ background: 'var(--bg)' }}>
       <div className="w-full max-w-[390px]">
         <div className="mb-7 text-center">
           <MgtMark className="mx-auto mb-4 h-16 w-16" />

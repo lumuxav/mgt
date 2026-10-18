@@ -1,6 +1,6 @@
-const CACHE_NAME = 'mgt-shell-v7'
+const CACHE_NAME = 'mgt-shell-v8'
 const OFFLINE_URL = '/offline.html'
-const SHELL = [OFFLINE_URL, '/icons/mgt-icon-192.png', '/icons/mgt-icon-512.png', '/icon.svg']
+const SHELL = [OFFLINE_URL, '/icons/mgt-icon-192.png?v=4', '/icons/mgt-icon-512.png?v=4', '/icon.svg']
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)))

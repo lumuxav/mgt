@@ -223,7 +223,7 @@ export default function BusinessSetupPage() {
   }
 
   return (
-    <main className="page-wrap setup-page">
+    <main className="page-wrap setup-page mgt-standalone-safe-page">
       <div className="page-header-row">
         <div>
           <p className="page-eyebrow">Platform setup</p>
