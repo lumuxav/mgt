@@ -481,3 +481,35 @@ textarea {
   bottom: calc(24px + env(safe-area-inset-bottom)); padding: 12px 20px;
   border-radius: 16px; background: #14243c; color: #fff; white-space: nowrap;
 }
+
+/* Only the installed Android WebView receives these viewport stability overrides.
+   The mobile website, installed PWA and desktop layouts retain their existing behavior. */
+@media (max-width: 900px) {
+  html[data-mgt-native-android="true"],
+  html[data-mgt-native-android="true"] body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  html[data-mgt-native-android="true"] .app-shell {
+    height: var(--mgt-viewport-height, 100dvh);
+    max-height: var(--mgt-viewport-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+  }
+  html[data-mgt-native-android="true"] .app-main {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: auto;
+    overscroll-behavior-y: contain;
+  }
+  html[data-mgt-native-android="true"] .app-mobile-header {
+    box-sizing: border-box;
+    padding-top: max(10px, env(safe-area-inset-top, 0px));
+  }
+  html[data-mgt-native-android="true"][data-keyboard="open"] .app-content {
+    padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  }
+}

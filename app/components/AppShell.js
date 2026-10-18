@@ -112,6 +112,15 @@ export default function AppShell({ children }) {
   if (mobileMenu.path !== pathname) setMobileMenu({ path: pathname, open: false })
   const mobileMenuOpen = mobileMenu.path === pathname && mobileMenu.open
   const setMobileMenuOpen = open => setMobileMenu({ path: pathname, open })
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [mobileMenuOpen])
   const isStandalone = pathname === '/install' || pathname === '/offline' || pathname === '/login' || pathname === '/setup' || pathname === '/onboarding' || pathname === '/forgot-password' || pathname === '/reset-password' || pathname === '/accept-invite' || pathname === '/shop' || pathname.startsWith('/shop/')
 
   useEffect(() => {
@@ -500,16 +509,16 @@ export default function AppShell({ children }) {
           <div className="mobile-nav-section">
             <p className="app-nav-label">Business workspace</p>
             <div className="mobile-nav-grid">
-              {visibleNav.map(item=><Link key={item.href} href={item.href} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span></Link>)}
+              {visibleNav.map(item=><Link key={item.href} href={item.href} onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span></Link>)}
             </div>
           </div>
 
           <div className="mobile-nav-section">
             <p className="app-nav-label">Management</p>
             <div className="mobile-nav-grid">
-              {visibleManagement.map(item=><Link key={item.href} href={item.href} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span>{item.href==='/notifications'&&notificationCount>0&&<b>{notificationCount>99?'99+':notificationCount}</b>}</Link>)}
-              {canManageUsers&&<Link href="/users" className={`mobile-nav-card ${active('/users')?'active':''}`}><Icon name="users"/><span>Staff & Access</span></Link>}
-              {isSuper&&<Link href="/system-control" className={`mobile-nav-card ${active('/system-control')?'active':''}`}><Icon name="system"/><span>System Control</span></Link>}
+              {visibleManagement.map(item=><Link key={item.href} href={item.href} onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active(item.href)?'active':''}`}><Icon name={item.icon}/><span>{item.label}</span>{item.href==='/notifications'&&notificationCount>0&&<b>{notificationCount>99?'99+':notificationCount}</b>}</Link>)}
+              {canManageUsers&&<Link href="/users" onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active('/users')?'active':''}`}><Icon name="users"/><span>Staff & Access</span></Link>}
+              {isSuper&&<Link href="/system-control" onClick={()=>setMobileMenuOpen(false)} className={`mobile-nav-card ${active('/system-control')?'active':''}`}><Icon name="system"/><span>System Control</span></Link>}
             </div>
           </div>
         </section>

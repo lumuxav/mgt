@@ -35,6 +35,7 @@ export default function MobileViewport() {
       root.style.setProperty('--mgt-viewport-height', `${viewportHeight}px`)
       root.style.setProperty('--mgt-viewport-width', `${viewportWidth}px`)
       root.style.setProperty('--mgt-viewport-offset-top', `${offsetTop}px`)
+      root.dataset.mgtNativeAndroid = window.Capacitor?.isNativePlatform?.() && window.Capacitor?.getPlatform?.() === 'android' ? 'true' : 'false'
       root.dataset.keyboard = keyboardOpen ? 'open' : 'closed'
       root.dataset.deviceClass = classifyWidth(window.innerWidth)
       root.dataset.orientation = window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait'
@@ -64,6 +65,7 @@ export default function MobileViewport() {
       document.removeEventListener('focusout', sync)
       visualViewport?.removeEventListener('resize', sync)
       visualViewport?.removeEventListener('scroll', sync)
+      delete root.dataset.mgtNativeAndroid
       delete root.dataset.keyboard
       delete root.dataset.deviceClass
       delete root.dataset.orientation
