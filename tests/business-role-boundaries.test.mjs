@@ -27,3 +27,21 @@ test('staff role and account status are protected by database migration',()=>{
  assert.match(s,/auth\.role\(\)/)
  for(const p of ['new.organization_id','new.role','new.active','new.archived_at']) assert.ok(s.includes(p))
 })
+
+test('only new businesses seed default permissions and existing roles stay customized',()=>{
+ const s=read('supabase/migrations/20261018_0038_staff_identity_privilege_guard.sql')
+ assert.match(s,/CREATE OR REPLACE FUNCTION public\.bootstrap_organization/i)
+ assert.match(s,/Existing staff account cannot bootstrap another business/)
+ assert.match(s,/if org_id is not null then return org_id; end if;/)
+ assert.equal((s.match(/perform public\.seed_default_roles\(org_id\);/g)||[]).length,1)
+ assert.match(s,/before insert on public\.users/)
+})
+test('owner staff access appears among the first dashboard shortcuts',()=>{
+ const s=read('app/page.js')
+ const head=s.indexOf("const quickActions = [")
+ const staff=s.indexOf("can('users.manage') && ['/users'")
+ const end=s.indexOf("].filter(Boolean).slice(0, 4)",head)
+ assert.ok(head<staff && staff<end)
+ const after=s.slice(head,staff).trim()
+ assert.equal(after,"const quickActions = [")
+})
