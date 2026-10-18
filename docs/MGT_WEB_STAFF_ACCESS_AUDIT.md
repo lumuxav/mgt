@@ -8,3 +8,6 @@ The existing MGT Supabase schema already has nine built-in business roles, 77 gr
 - The server's staff invitation/update routes reject business-assigned super_admin/system_admin and refuse reusing an account already bound to a business.
 - The companion SQL migration prevents direct authenticated profile edits from changing organization_id, role, active or archived_at and blocks reserved platform role keys.
 - No native installers rebuilt; no Maya resources touched. Acceptance tests with separate real staff accounts still required. Default location is not an enforceable branch-level permission restriction, and module-specific operation controls should be tested by user roles.
+
+- Existing-business calls to bootstrap_organization now return the current organization WITHOUT reseeding predefined roles or editing staff identities. Inactive/archived accounts cannot use bootstrap to create a second business. New founders still seed initial role templates.
+- Staff & Access appears first among an authorized owner's Home quick actions. The four-shortcut cap will not hide it behind operational links.
