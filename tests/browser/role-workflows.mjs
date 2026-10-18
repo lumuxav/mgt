@@ -32,13 +32,17 @@ try{
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   const authCalls=[]
+  const browserTrace=[]
   const failedRequests=[]
+  page.on('console',message=>{
+    if(message.text().startsWith('MGT_CI_LOGIN_'))browserTrace.push(message.text())
+  })
   page.on('requestfailed',request=>failedRequests.push({
     url:request.url().split('?')[0],error:request.failure()?.errorText||'network error'
   }))
   page.on('response',response=>{
     if(response.url().includes('/auth/v1/') || response.url().includes('/rest/v1/') || response.url().includes('/rpc/')) {
-      if(response.status()>=400)authCalls.push({status:response.status(),url:response.url().replace(/\?.*/,'')})
+      authCalls.push({status:response.status(),url:response.url().split('?')[0]})
     }
   })
   try{
@@ -76,7 +80,7 @@ try{
    console.log('PASS browser '+role+' auth, work area, primary module and restricted pages')
   }catch(e){
     const body=(await page.locator('body').innerText().catch(()=>''))?.slice(0,950)
-    failures.push({role,error:e.message.slice(0,450),url:page.url(),screen:body,requests:authCalls,networkFailures:failedRequests.slice(0,5),jsErrors:errors.slice(0,4)})
+    failures.push({role,error:e.message.slice(0,450),url:page.url(),screen:body,requests:authCalls.slice(0,12),browserTrace,networkFailures:failedRequests.slice(0,5),jsErrors:errors.slice(0,4)})
     console.log('DIAGNOSTIC '+role+': '+JSON.stringify(failures[failures.length-1]))
     await page.screenshot({path:'/tmp/mgt-browser-failure-'+role+'.png',fullPage:true}).catch(()=>{})
     console.log('FAIL browser '+role+': '+e.message.slice(0,1100))
