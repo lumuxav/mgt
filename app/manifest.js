@@ -15,9 +15,9 @@ export default function manifest() {
     "productivity"
   ],
   "icons": [
-    { "src": "/icons/mgt-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/mgt-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/mgt-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icons/mgt-icon-192.png?v=4", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mgt-icon-512.png?v=4", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mgt-icon-maskable-512.png?v=4", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     {
@@ -26,9 +26,9 @@ export default function manifest() {
       "url": "/pos",
       "icons": [
         {
-          "src": "/icons/mgt-icon-192.png?v=3",
+          "src": "/icons/mgt-icon-192.png?v=4",
           "sizes": "any",
-          "type": "image/svg+xml"
+          "type": "image/png"
         }
       ]
     },
@@ -38,9 +38,9 @@ export default function manifest() {
       "url": "/inventory",
       "icons": [
         {
-          "src": "/icons/mgt-icon-192.png?v=3",
+          "src": "/icons/mgt-icon-192.png?v=4",
           "sizes": "any",
-          "type": "image/svg+xml"
+          "type": "image/png"
         }
       ]
     },
@@ -50,9 +50,9 @@ export default function manifest() {
       "url": "/notifications",
       "icons": [
         {
-          "src": "/icons/mgt-icon-192.png?v=3",
+          "src": "/icons/mgt-icon-192.png?v=4",
           "sizes": "any",
-          "type": "image/svg+xml"
+          "type": "image/png"
         }
       ]
     }

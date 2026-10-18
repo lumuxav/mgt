@@ -67,7 +67,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main className="min-h-screen px-5 py-8 sm:grid sm:place-items-center" style={{ background: 'var(--bg)' }}>
+    <main className="mgt-standalone-safe-page min-h-screen px-5 py-8 sm:grid sm:place-items-center" style={{ background: 'var(--bg)' }}>
       <div className="mx-auto w-full max-w-[420px]">
         <div className="mb-7 text-center">
           <div className="app-brand-mark mx-auto mb-4">MGT</div>

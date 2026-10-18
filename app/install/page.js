@@ -12,7 +12,7 @@ const devices = [
 ]
 
 export default function InstallPage() {
-  return <main className="page-wrap mx-auto max-w-4xl py-8">
+  return <main className="page-wrap mgt-standalone-safe-page mx-auto max-w-4xl py-8">
     <div className="page-card p-6 sm:p-8">
       <MgtMark className="mb-5 h-16 w-16" />
       <p className="page-eyebrow">MGT Business Suite</p>

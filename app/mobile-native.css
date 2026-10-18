@@ -513,3 +513,22 @@ textarea {
     padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* Standalone screens need real safe-area space above their headings on Android.
+   This applies to setup, account screens and the install guide, without shifting
+   the authenticated desktop workspace. */
+:root {
+  --mgt-standalone-safe-top: env(safe-area-inset-top, 0px);
+  --mgt-standalone-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (max-width: 900px) {
+  .mgt-standalone-safe-page {
+    box-sizing: border-box;
+    padding-top: calc(42px + var(--mgt-standalone-safe-top)) !important;
+    padding-bottom: calc(18px + var(--mgt-standalone-safe-bottom)) !important;
+  }
+  html[data-mgt-native-android="true"] .mgt-standalone-safe-page {
+    min-height: var(--mgt-viewport-height, 100dvh);
+    padding-top: max(56px, calc(30px + var(--mgt-standalone-safe-top))) !important;
+  }
+}

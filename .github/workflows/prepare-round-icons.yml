@@ -1,0 +1,46 @@
+name: Prepare Approved Round MGT Icons
+
+on:
+  push:
+    branches: [codex/mgt-round-icon-safearea-20261018]
+    paths:
+      - scripts/generate-mgt-round-icons.py
+      - .github/workflows/prepare-round-icons.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'Pillow==11.3.0'
+      - name: Generate web, PWA and desktop round icons
+        run: python scripts/generate-mgt-round-icons.py --web
+      - name: Check generated icon transparency and sizes
+        run: |
+          python - <<'PY'
+          from PIL import Image
+          for path,dim in [('app/icon.png',512),('public/icons/mgt-icon-192.png',192),('public/icons/mgt-icon-512.png',512)]:
+              im=Image.open(path).convert('RGBA')
+              assert im.size == (dim,dim), path
+              assert im.getpixel((0,0))[3]==0, path
+          maskable=Image.open('public/icons/mgt-icon-maskable-512.png').convert('RGBA')
+          assert maskable.getpixel((0,0))[3]==255
+          print('Generated round icon assets verified')
+          PY
+      - name: Commit generated assets on the feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/favicon.ico app/icon.png app/icon.svg public/icon.svg assets/logo.svg public/icons
+          if ! git diff --cached --quiet; then
+            git commit -m "Generate round MGT launcher and PWA icons from approved artwork"
+            git push origin HEAD:codex/mgt-round-icon-safearea-20261018
+          fi
