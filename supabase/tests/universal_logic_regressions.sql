@@ -155,6 +155,11 @@ begin
  insert into audit_results(test) values('All transaction journals balance');
 
  insert into public.customers(id,organization_id,name,credit_limit,opening_balance,created_at) values(closing_customer,org,'Closing audit customer',1000,10,current_date-1);
+ -- The migration RPC creates the opening journal under authorized service
+ -- credentials before the historic accounting period is closed.
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','service_role')::text,true);
+ perform public.server_set_opening_balance(org,actor,'customer',closing_customer,10,'replace',current_date-1,null);
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
  insert into public.sales(id,organization_id,location_id,customer_id,sale_number,status,subtotal,total_amount,created_at,sold_by) values(closing_sale,org,loc,closing_customer,'AUDIT-CLOSED','completed',10,10,current_date-1,actor);
  insert into public.sale_items(sale_id,product_id,description,quantity,unit_price,unit_cost,line_total) values(closing_sale,service,'Audit service',1,10,0,10) returning id into item;
  insert into public.work_orders(id,organization_id,location_id,customer_id,title,status,quoted_amount,final_amount,completed_at,created_at,created_by) values(closing_job,org,loc,closing_customer,'Closing audit job','completed',100,100,current_date-1,current_date-1,actor);
@@ -166,7 +171,13 @@ begin
  result:=public.record_work_order_payment(closing_job,20,'bank');
  if (result->>'balance')::numeric<>80 then raise exception 'Closed-period completed job cannot receive repayment'; end if;
  insert into audit_results(test) values('Old completed service job can receive a current repayment');
- perform pg_temp.expect_error('Closed opening journal cannot be moved to an open date',format('select public.set_party_opening_balance(%L,%L,50,current_date)','customer',closing_customer),'closed accounting period');
+ -- The old public set_party_opening_balance wrapper is not defined in the
+ -- tracked migrations. Test the real service-only entry point instead.
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','service_role')::text,true);
+ perform pg_temp.expect_error('Closed opening journal cannot be moved to an open date',
+   format('select public.server_set_opening_balance(%L::uuid,%L::uuid,%L,%L::uuid,50,%L,current_date,null)',
+     org,actor,'customer',closing_customer,'replace'),'closed accounting period');
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
 end $$;
 select * from audit_results order by test;
 rollback;
