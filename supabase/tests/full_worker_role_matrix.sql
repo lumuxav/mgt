@@ -139,6 +139,9 @@ SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000008515'
 SELECT pg_temp.ok(NOT public.has_permission('inventory.view'),'disabled secondary role immediately loses inventory access');
 RESET ROLE;
 UPDATE public.roles SET active=true WHERE organization_id='00000000-0000-0000-0000-000000008001' AND key='storekeeper';
+-- Only the audited server identity can archive an existing staff member.
+SELECT set_config('request.jwt.claims','{"role":"service_role"}',true);
+SELECT set_config('request.jwt.claim.role','service_role',true);
 UPDATE public.users SET archived_at=now() WHERE id='00000000-0000-0000-0000-000000008515';
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-000000008515","role":"authenticated"}',true);
