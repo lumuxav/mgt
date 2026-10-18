@@ -1,0 +1,101 @@
+name: Validate MGT Worker Browser Journeys
+
+on:
+  pull_request:
+    branches: [universal-business-platform]
+    paths:
+      - 'tests/browser/**'
+      - '.github/workflows/validate-worker-browser.yml'
+      - 'app/**'
+      - 'lib/**'
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-browser:
+    name: Chromium sign-in and job journeys with disposable Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install app and Chromium
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false playwright@1.58.2
+          npx playwright install --with-deps chromium
+      - name: Start disposable Supabase Auth, API and SQL services
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase init --yes
+          python3 - <<'PY'
+          from pathlib import Path
+          paths=sorted(Path('supabase/migrations').glob('*.sql'))
+          assert len(paths)>=45
+          for i,path in enumerate(paths):
+              path.rename(path.with_name(f'20261018{i:06d}_browser_{i:03d}.sql'))
+          print(f'Normalized {len(paths)} migration versions ONLY on disposable CI checkout')
+          PY
+          supabase start
+          supabase status -o env > /tmp/mgt-ci-supabase.env
+          python3 - <<'PY'
+          from pathlib import Path
+          import shlex
+          env={}
+          for line in Path('/tmp/mgt-ci-supabase.env').read_text().splitlines():
+              if '=' in line and not line.startswith('#'):
+                  k,v=line.split('=',1)
+                  env[k]=v.strip().strip('"')
+          for key in ('API_URL','ANON_KEY','SERVICE_ROLE_KEY'):
+              assert env.get(key), f'Local Supabase missing {key}'
+          assert env['API_URL']=='http://127.0.0.1:54321', 'Refuse non-local Supabase'
+          with open(__import__('os').environ['GITHUB_ENV'],'a') as dest:
+              for k,v in [('NEXT_PUBLIC_SUPABASE_URL',env['API_URL']),('NEXT_PUBLIC_SUPABASE_ANON_KEY',env['ANON_KEY']),('SUPABASE_SERVICE_ROLE_KEY',env['SERVICE_ROLE_KEY'])]:
+                  dest.write(f'{k}={v}\n')
+          print('Configured local-only Auth, REST, and service credentials without printing secrets')
+          PY
+      - name: Enable strictly local URL in disposable checkout only
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs'
+          const file='lib/supabaseGuard.js'
+          const old=fs.readFileSync(file,'utf8')
+          const anchor='  if (host !== `${EXPECTED_MGT_SUPABASE_REF}.supabase.co`) {'
+          if(!old.includes(anchor))throw Error('MGT isolation guard unexpectedly changed')
+          fs.writeFileSync(file,old.replace(anchor,"  if (url === 'http://127.0.0.1:54321') return url\n"+anchor))
+          console.log('Allow local E2E URL in ephemeral runner only; original repository guard unchanged')
+          JS
+      - name: Prepare independent fictional business and staff logins
+        run: node tests/browser/seed-local.mjs
+      - name: Launch MGT website with local backend
+        shell: bash
+        run: |
+          npm run dev -- --hostname 127.0.0.1 --port 3000 > /tmp/mgt-next-e2e.log 2>&1 &
+          echo $! > /tmp/mgt-next-e2e.pid
+          for i in $(seq 1 100); do
+            if curl -sf http://127.0.0.1:3000/login > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          tail -120 /tmp/mgt-next-e2e.log
+          exit 1
+      - name: Test all 15 real browser worker sessions and assigned tasks
+        run: node tests/browser/role-workflows.mjs
+      - name: Show app failure diagnostics (if any)
+        if: failure()
+        run: tail -120 /tmp/mgt-next-e2e.log || true
+      - name: Stop and destroy disposable Supabase and server
+        if: always()
+        run: |
+          if [[ -f /tmp/mgt-next-e2e.pid ]]; then kill "$(cat /tmp/mgt-next-e2e.pid)" || true; fi
+          supabase stop --no-backup || true
