@@ -57,6 +57,9 @@ jobs:
           if [[ -f supabase/tests/modular_staff_local_validation.sql ]]; then
             docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/modular_staff_local_validation.sql
           fi
+          echo "::group::Full fifteen-profile worker role acceptance"
+          docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/full_worker_role_matrix.sql
+          echo "::endgroup::"
           for suite in \
             supabase/tests/universal_logic_regressions.sql \
             supabase/tests/access_and_banking_regressions.sql \
