@@ -31,7 +31,10 @@ export default function MyWorkPage(){
       setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],attendance:work.data?.attendance||{}})
     }catch(error){setFailure(error?.message||'Could not load your work.')}finally{setLoading(false)}
   }
-  useEffect(()=>{load()},[])
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>{void load()},0)
+    return ()=>window.clearTimeout(timer)
+  },[])
   const run=async(key,fn)=>{
     setBusy(key);setMessage('');setFailure('')
     try{
