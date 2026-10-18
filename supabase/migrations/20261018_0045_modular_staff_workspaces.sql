@@ -367,3 +367,73 @@ begin
 
  return jsonb_build_object('approval_request_id',v_req.id,'status',p_decision,'request_type',v_req.request_type);
 end; $function$;
+
+-- Additional practical job types are available to each business out of the box.
+-- These inserts never overwrite existing custom grants or role descriptions.
+insert into public.roles(organization_id,key,name,description,is_system,active)
+select o.id,v.key,v.name,v.description,true,true from public.organizations o
+cross join (values
+ ('procurement_officer','Procurement Officer','Purchasing, suppliers and receiving'),
+ ('hr_officer','HR Officer','People, attendance, leave and pay records'),
+ ('technician','Technician','Assigned service work and timesheets'),
+ ('delivery_driver','Delivery Driver','Dispatch and delivery progress'),
+ ('project_worker','Project Worker','Assigned tasks and time recording'),
+ ('branch_manager','Branch Manager','Branch operational oversight')
+) as v(key,name,description)
+on conflict(organization_id,key) do nothing;
+
+insert into public.default_role_permission_templates(role,permission)
+select role_key,permission_code from (values
+ ('procurement_officer','dashboard.view'),('procurement_officer','purchasing.view'),
+ ('procurement_officer','purchasing.create'),('procurement_officer','purchasing.receive'),
+ ('procurement_officer','suppliers.view'),('procurement_officer','suppliers.manage'),
+ ('procurement_officer','catalog.view'),('procurement_officer','inventory.view'),
+ ('hr_officer','dashboard.view'),('hr_officer','hr.view'),('hr_officer','hr.manage'),
+ ('hr_officer','attendance.use'),('hr_officer','attendance.manage'),
+ ('hr_officer','leave.request'),('hr_officer','leave.manage'),
+ ('hr_officer','payroll.view'),('hr_officer','payroll.manage'),
+ ('delivery_driver','dashboard.view'),('delivery_driver','fleet.dispatch'),
+ ('delivery_driver','fleet.view'),('delivery_driver','attendance.use'),
+ ('project_worker','dashboard.view'),('project_worker','projects.time'),
+ ('branch_manager','dashboard.view'),('branch_manager','sales.view'),
+ ('branch_manager','sales.create'),('branch_manager','catalog.view'),
+ ('branch_manager','inventory.view'),('branch_manager','purchasing.view'),
+ ('branch_manager','purchasing.receive'),('branch_manager','customers.view'),
+ ('branch_manager','customers.manage'),('branch_manager','reports.view'),
+ ('branch_manager','finance.view'),('branch_manager','approvals.view')
+) as v(role_key,permission_code)
+on conflict do nothing;
+
+insert into public.role_permissions(organization_id,role,permission,allowed)
+select r.organization_id,r.key,t.permission,true
+from public.roles r join public.default_role_permission_templates t on t.role=r.key
+where r.key in ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
+on conflict(organization_id,role,permission) do nothing;
+
+-- Seed extended job types automatically when a future company is created.
+create or replace function public.mgt_seed_new_business_job_roles()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ insert into public.roles(organization_id,key,name,description,is_system,active)
+ select new.id,v.key,v.name,v.description,true,true from (values
+ ('procurement_officer','Procurement Officer','Purchasing and suppliers'),
+ ('hr_officer','HR Officer','People and leave management'),
+ ('technician','Technician','Assigned service work'),
+ ('delivery_driver','Delivery Driver','Dispatch and delivery progress'),
+ ('project_worker','Project Worker','Assigned project tasks'),
+ ('branch_manager','Branch Manager','Branch operations')
+ ) as v(key,name,description)
+ on conflict(organization_id,key) do nothing;
+ insert into public.role_permissions(organization_id,role,permission,allowed)
+ select new.id,r.key,t.permission,true from public.roles r
+ join public.default_role_permission_templates t on t.role=r.key
+ where r.organization_id=new.id and r.key in
+ ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
+ on conflict(organization_id,role,permission) do nothing;
+ return new;
+end; $$;
+drop trigger if exists mgt_seed_new_business_job_roles on public.organizations;
+create trigger mgt_seed_new_business_job_roles
+after insert on public.organizations for each row
+execute function public.mgt_seed_new_business_job_roles();
+revoke all on function public.mgt_seed_new_business_job_roles() from public,anon,authenticated;
