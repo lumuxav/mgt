@@ -211,6 +211,21 @@ create policy sales_org_select on public.sales for select to authenticated using
  public.has_organization_access(organization_id) and public.has_permission('sales.view')
  and public.mgt_record_scope_allows(organization_id,location_id,sold_by,false)
 );
+-- Break work_orders <-> work_order_assignments RLS policy recursion by
+-- checking assignment membership inside this narrowly scoped definer function.
+create or replace function public.mgt_is_work_order_assignee(p_work_order_id uuid)
+returns boolean language sql stable security definer set search_path=public as $
+ select public.current_organization_id() is not null
+ and exists(
+  select 1 from public.work_orders w
+  join public.work_order_assignments wa on wa.work_order_id=w.id
+  where w.id=p_work_order_id and w.organization_id=public.current_organization_id()
+    and wa.user_id=auth.uid()
+ )
+$;
+revoke all on function public.mgt_is_work_order_assignee(uuid) from public,anon;
+grant execute on function public.mgt_is_work_order_assignee(uuid) to authenticated,service_role;
+
 drop policy if exists work_orders_select on public.work_orders;
 create policy work_orders_select on public.work_orders for select to authenticated using(
  public.has_organization_access(organization_id)
@@ -218,12 +233,11 @@ create policy work_orders_select on public.work_orders for select to authenticat
     public.has_permission('services.view')
     or public.has_permission('services.manage')
     or (public.has_permission('services.assigned') and (
-      assigned_to=auth.uid() or exists(select 1 from public.work_order_assignments wa
-      where wa.work_order_id=work_orders.id and wa.user_id=auth.uid())
+      assigned_to=auth.uid() or public.mgt_is_work_order_assignee(work_orders.id)
     ))
  )
  and public.mgt_record_scope_allows(organization_id,location_id,assigned_to,
-    exists(select 1 from public.work_order_assignments wa where wa.work_order_id=work_orders.id and wa.user_id=auth.uid()))
+    public.mgt_is_work_order_assignee(work_orders.id))
 );
 
 -- New staff receive a conservative, job-shaped scope from day one.
