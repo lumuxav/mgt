@@ -59,6 +59,16 @@ await checked(await admin.from('work_orders').insert({
  organization_id:foreign.id,location_id:foreignOffice.id,title:'Unrelated Company Confidential Job',
  assigned_to:accounts.foreign_owner.id,quoted_amount:555000
 }),'create foreign private work order')
+// Verify the public browser key can authenticate a real seeded account.
+const publicKey=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+if(!publicKey)throw Error('Local browser anon key unavailable')
+const anonymous=createClient(url,publicKey,{auth:{persistSession:false,autoRefreshToken:false}})
+const trial=await anonymous.auth.signInWithPassword({email:accounts.owner.email,password})
+if(trial.error||!trial.data?.session?.access_token){
+ throw Error('Disposable account password authentication failed before browser launch: '+(trial.error?.message||'no session'))
+}
+await anonymous.auth.signOut()
+console.log('Local Supabase public-key owner password authentication verified')
 const data={accounts,orgId:company.id,officeId:office.id,otherOfficeId:otherOffice.id,
  workOrderId:workOrder.id,deliveryId:delivery.id}
 await fs.writeFile('/tmp/mgt-e2e-fixtures.json',JSON.stringify(data))
