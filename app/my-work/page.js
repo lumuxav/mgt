@@ -88,9 +88,9 @@ export default function MyWorkPage(){
         <p className="mb-4 mt-1 text-xs text-muted">Update progress on tasks allocated to your account.</p>
         {data.tasks.length===0?<p className="text-sm text-muted">No active project tasks assigned.</p>:<div className="space-y-3">{data.tasks.map(task=><article key={task.id} className="rounded-xl border border-[var(--line)] p-3">
           <strong>{task.title}</strong><p className="mt-1 text-xs text-muted">{pretty(task.status)}{task.due_date?' · Due '+task.due_date:''}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          {(can('projects.time')||can('projects.manage'))&&<div className="mt-3 flex flex-wrap gap-2">
             {['in_progress','blocked','completed'].filter(x=>x!==task.status).map(status=><button key={status} type="button" disabled={!!busy} onClick={()=>run(task.id+status,()=>supabase.rpc('update_project_task',{p_task_id:task.id,p_status:status,p_progress_percent:status==='completed'?100:null}))} className="btn-secondary rounded-xl px-2 py-2 text-xs font-bold">{pretty(status)}</button>)}
-          </div>
+          </div>}
         </article>)}</div>}
       </div>
       <div className="page-card p-5">
