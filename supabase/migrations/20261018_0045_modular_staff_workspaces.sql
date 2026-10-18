@@ -214,7 +214,7 @@ create policy sales_org_select on public.sales for select to authenticated using
 -- Break work_orders <-> work_order_assignments RLS policy recursion by
 -- checking assignment membership inside this narrowly scoped definer function.
 create or replace function public.mgt_is_work_order_assignee(p_work_order_id uuid)
-returns boolean language sql stable security definer set search_path=public as $
+returns boolean language sql stable security definer set search_path=public as $$
  select public.current_organization_id() is not null
  and exists(
   select 1 from public.work_orders w
@@ -222,7 +222,7 @@ returns boolean language sql stable security definer set search_path=public as $
   where w.id=p_work_order_id and w.organization_id=public.current_organization_id()
     and wa.user_id=auth.uid()
  )
-$;
+$$;
 revoke all on function public.mgt_is_work_order_assignee(uuid) from public,anon;
 grant execute on function public.mgt_is_work_order_assignee(uuid) to authenticated,service_role;
 
