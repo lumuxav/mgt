@@ -122,14 +122,14 @@ grant execute on function public.mgt_my_work() to authenticated,service_role;
 -- Technician updates only assigned jobs and cannot complete, reopen, price or cancel jobs.
 create or replace function public.mgt_update_assigned_job(p_work_order_id uuid,p_status text)
 returns jsonb language plpgsql security definer set search_path=public as $$
-declare v_org uuid:=public.current_organization_id();v_me uuid:=auth.uid();v_previous text;
+declare v_org uuid:=public.current_organization_id();v_me uuid:=auth.uid();v_previous text;v_location uuid;
 begin
  if v_org is null or not(public.has_permission('services.assigned') or public.has_permission('services.manage'))
  then raise exception 'Permission denied: assigned service job'; end if;
  if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='services' and enabled)
  then raise exception 'Services module not enabled'; end if;
  if p_status not in ('in_progress','on_hold') then raise exception 'Unsupported job progress action'; end if;
- select w.status into v_previous from public.work_orders w where w.id=p_work_order_id and w.organization_id=v_org
+ select w.status,w.location_id into v_previous,v_location from public.work_orders w where w.id=p_work_order_id and w.organization_id=v_org
  and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
  and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true) for update;
  if not found then raise exception 'Job is not assigned to you'; end if;
@@ -140,6 +140,9 @@ begin
  insert into public.work_order_events(organization_id,work_order_id,event_type,description,metadata,user_id)
  values(v_org,p_work_order_id,'staff_progress','Assigned technician updated job progress',
  jsonb_build_object('old',v_previous,'new',p_status),v_me);
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(v_org,v_location,v_me,'assigned_service_progress','work_order',p_work_order_id::text,
+ 'Assigned worker changed service status',jsonb_build_object('from_status',v_previous,'to_status',p_status));
  return jsonb_build_object('id',p_work_order_id,'status',p_status);
 end; $$;
 revoke all on function public.mgt_update_assigned_job(uuid,text) from public,anon;
