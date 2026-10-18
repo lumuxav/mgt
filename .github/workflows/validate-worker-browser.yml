@@ -84,7 +84,7 @@ jobs:
             "    console.info('MGT_CI_LOGIN_VALUES', JSON.stringify({ emailLength: email.length, passwordLength: password.length }))",
             needle,
             "    console.info('MGT_CI_LOGIN_RESULT', JSON.stringify({ error: err?.message || null, code: err?.code || null, status: err?.status || null }))"
-          ].join('\\n')))
+          ].join(String.fromCharCode(10))))
           JS
       - name: Prepare independent fictional business and staff logins
         run: node tests/browser/seed-local.mjs
