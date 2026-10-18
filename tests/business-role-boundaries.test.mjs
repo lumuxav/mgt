@@ -45,3 +45,12 @@ test('owner staff access appears among the first dashboard shortcuts',()=>{
  const after=s.slice(head,staff).trim()
  assert.equal(after,"const quickActions = [")
 })
+
+test('direct role and staff table writes are not authorized for browser clients',()=>{
+ const s=read('supabase/migrations/20261018_0038_staff_identity_privilege_guard.sql')
+ for(const policy of ['users_admin_insert','users_admin_delete','roles_org_insert','roles_org_update','roles_org_delete','role_permissions_org_access']) {
+   assert.ok(s.includes('drop policy if exists '+policy))
+ }
+ assert.match(s,/create policy role_permissions_org_select/)
+ assert.match(s,/for select to authenticated/)
+});
