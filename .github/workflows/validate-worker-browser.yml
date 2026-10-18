@@ -75,6 +75,16 @@ jobs:
           if(!old.includes(anchor))throw Error('MGT isolation guard unexpectedly changed')
           fs.writeFileSync(file,old.replace(anchor,"  if (url === 'http://127.0.0.1:54321') return url\n"+anchor))
           console.log('Allow local E2E URL in ephemeral runner only; original repository guard unchanged')
+          // Login diagnostics are local-runner-only and never print actual credentials.
+          const login='app/login/page.js'
+          const loginSource=fs.readFileSync(login,'utf8')
+          const needle="    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })"
+          if(!loginSource.includes(needle))throw Error('MGT login source unexpectedly changed')
+          fs.writeFileSync(login,loginSource.replace(needle,[
+            "    console.info('MGT_CI_LOGIN_VALUES', JSON.stringify({ emailLength: email.length, passwordLength: password.length }))",
+            needle,
+            "    console.info('MGT_CI_LOGIN_RESULT', JSON.stringify({ error: err?.message || null, code: err?.code || null, status: err?.status || null }))"
+          ].join('\\n')))
           JS
       - name: Prepare independent fictional business and staff logins
         run: node tests/browser/seed-local.mjs
