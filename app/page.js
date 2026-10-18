@@ -104,6 +104,7 @@ export default function HomePage() {
   const initials = useMemo(() => (profile?.full_name || 'User').split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase(), [profile])
 
   const quickActions = [
+    can('users.manage') && ['/users', 'Staff & Access', 'Manage business staff and privileges', '♧'],
     moduleEnabled(business, 'insights') && can('insights.view') && ['/insights', 'MGT Intelligence', 'Forecasts and quick business answers', '✦'],
     moduleEnabled(business, 'pos') && can('sales.create') && ['/pos', 'New POS sale', 'Fast counter checkout', '+'],
     moduleEnabled(business, 'sales') && can('sales.view') && ['/sales', 'Sales & credit', 'Receipts, debt and returns', '▤'],
@@ -112,7 +113,6 @@ export default function HomePage() {
     moduleEnabled(business, 'purchasing') && can('purchasing.create') && ['/purchasing', 'New purchase', 'Order or receive stock', '↓'],
     moduleEnabled(business, 'manufacturing') && can('manufacturing.manage') && ['/production', 'Production', 'Plan or record output', '⚙'],
     moduleEnabled(business, 'services') && can('services.manage') && ['/work-orders', 'New job', 'Create a service work order', '⌁'],
-    can('users.manage') && ['/users', 'Staff & Access', 'Manage business staff and privileges', '♧'],
   ].filter(Boolean).slice(0, 4)
 
   if (loading) return <main className="page-wrap text-muted">Opening business workspace...</main>
