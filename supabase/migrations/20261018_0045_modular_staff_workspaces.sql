@@ -545,3 +545,17 @@ begin
 end; $$;
 revoke all on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) from public,anon;
 grant execute on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) to authenticated,service_role;
+
+-- An owner deleting a custom role cannot leave stale secondary assignments.
+create or replace function public.mgt_cleanup_extra_roles_after_role_delete()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ delete from public.user_additional_roles
+ where organization_id=old.organization_id and role=old.key;
+ return old;
+end; $$;
+drop trigger if exists mgt_cleanup_extra_roles_on_role_delete on public.roles;
+create trigger mgt_cleanup_extra_roles_on_role_delete
+after delete on public.roles for each row
+execute function public.mgt_cleanup_extra_roles_after_role_delete();
+revoke all on function public.mgt_cleanup_extra_roles_after_role_delete() from public,anon,authenticated;
