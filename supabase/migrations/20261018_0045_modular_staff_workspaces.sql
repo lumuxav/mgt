@@ -407,7 +407,7 @@ on conflict do nothing;
 insert into public.role_permissions(organization_id,role,permission,allowed)
 select r.organization_id,r.key,t.permission,true
 from public.roles r join public.default_role_permission_templates t on t.role=r.key
-where r.key in ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
+where r.is_system and r.key in ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
 on conflict(organization_id,role,permission) do nothing;
 
 -- Seed extended job types automatically when a future company is created.
