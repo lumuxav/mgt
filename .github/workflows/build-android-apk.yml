@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [universal-business-platform]
-    paths: ["capacitor.config.json", "mobile-shell/**", "assets/**", "scripts/configure-android.cjs", "package.json", "package-lock.json", ".github/workflows/build-android-apk.yml"]
+    paths: ["capacitor.config.json", "mobile-shell/**", "app/mobile-native.css", "app/components/MobileViewport.js", "assets/**", "scripts/configure-android.cjs", "package.json", "package-lock.json", ".github/workflows/build-android-apk.yml"]
   workflow_call:
     inputs:
       release_number:
