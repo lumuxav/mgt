@@ -8,6 +8,8 @@ on:
       - 'desktop/**'
       - 'capacitor.config.json'
       - 'mobile-shell/**'
+      - 'app/mobile-native.css'
+      - 'app/components/MobileViewport.js'
       - 'assets/**'
       - 'public/icons/**'
       - 'scripts/configure-android.cjs'
