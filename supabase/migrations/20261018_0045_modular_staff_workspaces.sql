@@ -140,3 +140,88 @@ insert into public.role_permissions(organization_id,role,permission,allowed)
 select r.organization_id,r.key,'services.assigned',true from public.roles r
 where r.key in ('employee','production_staff') and r.active
 on conflict(organization_id,role,permission) do nothing;
+
+-- Atomically save an employee's additional (nonadministrator) roles and
+-- optional sales/service record scope; callers cannot modify themselves.
+create or replace function public.server_set_staff_work_access(
+ p_organization_id uuid,p_actor_id uuid,p_user_id uuid,
+ p_roles text[],p_scope text,p_location_id uuid default null
+) returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_actor public.users%rowtype;v_target public.users%rowtype;
+begin
+ if coalesce(auth.role(),'')<>'service_role' then raise exception 'Server access required'; end if;
+ if p_actor_id=p_user_id then raise exception 'Cannot alter your own additional roles'; end if;
+ select * into v_actor from public.users
+  where id=p_actor_id and organization_id=p_organization_id and active and archived_at is null;
+ if not found then raise exception 'Active business administrator required'; end if;
+ if v_actor.role not in ('owner','admin','super_admin','system_admin')
+  and not(
+    exists(select 1 from public.role_permissions where organization_id=p_organization_id and role=v_actor.role and permission='users.manage' and allowed)
+    and exists(select 1 from public.role_permissions where organization_id=p_organization_id and role=v_actor.role and permission='roles.manage' and allowed)
+  ) then raise exception 'Insufficient staff administration permissions'; end if;
+ select * into v_target from public.users
+ where id=p_user_id and organization_id=p_organization_id and archived_at is null for update;
+ if not found then raise exception 'Staff account not found'; end if;
+ if v_target.role in ('owner','super_admin','system_admin') and v_actor.role not in ('owner','super_admin','system_admin')
+ then raise exception 'Only business owner may manage another owner'; end if;
+ if p_scope not in ('organization','location','assigned') then raise exception 'Invalid work scope'; end if;
+ if p_scope='location' and not exists(
+  select 1 from public.locations where organization_id=p_organization_id and id=p_location_id and active
+ ) then raise exception 'Choose an active location in this business'; end if;
+ if coalesce(array_length(p_roles,1),0)>10 then raise exception 'Too many additional roles'; end if;
+ if exists(select 1 from unnest(coalesce(p_roles,array[]::text[])) role_key
+ where role_key in ('owner','admin','super_admin','system_admin') or role_key=v_target.role
+ or not exists(select 1 from public.roles r where r.organization_id=p_organization_id and r.key=role_key and r.active))
+ then raise exception 'Invalid additional role'; end if;
+ delete from public.user_additional_roles where organization_id=p_organization_id and user_id=p_user_id;
+ insert into public.user_additional_roles(organization_id,user_id,role,granted_by)
+ select p_organization_id,p_user_id,role_key,p_actor_id from
+ (select distinct unnest(coalesce(p_roles,array[]::text[])) role_key) roles;
+ insert into public.user_work_scope(organization_id,user_id,scope,location_id,updated_by,updated_at)
+ values(p_organization_id,p_user_id,p_scope,case when p_scope='location' then p_location_id else null end,p_actor_id,now())
+ on conflict(organization_id,user_id) do update set scope=excluded.scope,
+ location_id=excluded.location_id,updated_by=excluded.updated_by,updated_at=now();
+ insert into public.audit_log(organization_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(p_organization_id,p_actor_id,'staff_work_access_changed','user',p_user_id::text,
+ 'Staff work roles and access scope updated',jsonb_build_object('roles',p_roles,'scope',p_scope,'location_id',p_location_id));
+ return jsonb_build_object('ok',true);
+end; $$;
+revoke all on function public.server_set_staff_work_access(uuid,uuid,uuid,text[],text,uuid) from public,anon,authenticated;
+grant execute on function public.server_set_staff_work_access(uuid,uuid,uuid,text[],text,uuid) to service_role;
+
+-- Enforce location or assigned-only visibility for sales and service orders.
+-- Existing workers have no scope row and retain their established access.
+create or replace function public.mgt_record_scope_allows(
+ p_org uuid,p_location uuid,p_owner uuid,p_secondary_assignment boolean default false
+) returns boolean language sql stable security definer set search_path=public as $$
+ select coalesce((
+ select case s.scope
+   when 'organization' then true
+   when 'location' then s.location_id=p_location
+   when 'assigned' then p_owner=auth.uid() or p_secondary_assignment
+   else false end
+ from public.user_work_scope s where s.organization_id=p_org and s.user_id=auth.uid()
+ ),true)
+$$;
+revoke all on function public.mgt_record_scope_allows(uuid,uuid,uuid,boolean) from public,anon;
+grant execute on function public.mgt_record_scope_allows(uuid,uuid,uuid,boolean) to authenticated,service_role;
+
+drop policy if exists sales_org_select on public.sales;
+create policy sales_org_select on public.sales for select to authenticated using(
+ public.has_organization_access(organization_id) and public.has_permission('sales.view')
+ and public.mgt_record_scope_allows(organization_id,location_id,sold_by,false)
+);
+drop policy if exists work_orders_select on public.work_orders;
+create policy work_orders_select on public.work_orders for select to authenticated using(
+ public.has_organization_access(organization_id)
+ and (
+    public.has_permission('services.view')
+    or public.has_permission('services.manage')
+    or (public.has_permission('services.assigned') and (
+      assigned_to=auth.uid() or exists(select 1 from public.work_order_assignments wa
+      where wa.work_order_id=work_orders.id and wa.user_id=auth.uid())
+    ))
+ )
+ and public.mgt_record_scope_allows(organization_id,location_id,assigned_to,
+    exists(select 1 from public.work_order_assignments wa where wa.work_order_id=work_orders.id and wa.user_id=auth.uid()))
+);
