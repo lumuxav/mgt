@@ -1,0 +1,45 @@
+name: Validate MGT SQL Locally (No Supabase Branch)
+
+on:
+  pull_request:
+    branches: [universal-business-platform]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/**'
+      - '.github/workflows/validate-local-database.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-database:
+    name: Rebuild MGT database on disposable GitHub runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+      - name: Initialize local-only database configuration
+        run: supabase init --yes
+      - name: Rebuild schema and replay all MGT SQL migrations locally
+        run: supabase db start
+      - name: Validate actual PostgreSQL objects and permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          db_container="$(docker ps --filter 'name=supabase_db_' --format '{{.ID}}' | head -n 1)"
+          test -n "$db_container"
+          docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          select 'MGT local migration replay succeeded' as check_label;
+          select count(*) as catalog_permissions from public.permission_catalog;
+          select proname from pg_proc where proname in ('mgt_my_work','server_set_staff_work_access','mgt_update_assigned_delivery');
+          SQL
+          if [[ -f supabase/tests/modular_staff_local_validation.sql ]]; then
+            docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/tests/modular_staff_local_validation.sql
+          fi
+      - name: Stop and destroy the ephemeral database
+        if: always()
+        run: supabase stop --no-backup || true
