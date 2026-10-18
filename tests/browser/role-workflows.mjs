@@ -31,6 +31,12 @@ try{
   const page=await context.newPage()
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
+  const authCalls=[]
+  page.on('response',response=>{
+    if(response.url().includes('/auth/v1/') || response.url().includes('/rest/v1/') || response.url().includes('/rpc/')) {
+      if(response.status()>=400)authCalls.push({status:response.status(),url:response.url().replace(/\?.*/,'')})
+    }
+  })
   try{
    await page.goto(base+'/login',{waitUntil:'domcontentloaded',timeout:deadline})
    await page.locator('#email').fill(fixture.accounts[role].email)
@@ -61,11 +67,13 @@ try{
    if(errors.length)throw Error('Browser JS errors: '+errors.join(' | ').slice(0,600))
    console.log('PASS browser '+role+' auth, work area, primary module and restricted pages')
   }catch(e){
-    failures.push({role,error:e.message.slice(0,1100),url:page.url()})
+    const body=(await page.locator('body').innerText().catch(()=>''))?.slice(0,950)
+    failures.push({role,error:e.message.slice(0,450),url:page.url(),screen:body,requests:authCalls,jsErrors:errors.slice(0,4)})
+    console.log('DIAGNOSTIC '+role+': '+JSON.stringify(failures[failures.length-1]))
     await page.screenshot({path:'/tmp/mgt-browser-failure-'+role+'.png',fullPage:true}).catch(()=>{})
     console.log('FAIL browser '+role+': '+e.message.slice(0,1100))
   }finally{await page.close()}
-  if(failures.length>=3){console.log('Stopping early after three browser failures to surface diagnostics before timeout');break}
+  if(failures.length>=1){console.log('Stopping early on first failed sign-in/screen to identify the cause');break}
  }
  // The two operative workflows must change live data through real browser clicks.
  for(const [role,flow] of [
@@ -87,6 +95,7 @@ try{
    check(true,'driver submitted proof of delivery through the real browser')
   }]
  ]){
+  if(!contexts[role])continue
   const page=await contexts[role].newPage()
   try{await flow(page);console.log('PASS full worker workflow: '+role)}
   catch(e){failures.push({role:role+' workflow',error:e.message.slice(0,1200),url:page.url()});await page.screenshot({path:'/tmp/mgt-browser-flow-'+role+'.png',fullPage:true}).catch(()=>{});console.log('FAIL workflow '+role+': '+e.message.slice(0,1200))}
