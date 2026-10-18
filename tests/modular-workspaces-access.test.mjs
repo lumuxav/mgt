@@ -87,3 +87,25 @@ test('assigned drivers can update only allocated trips with proof and status lim
  assert.match(page,/My assigned deliveries/)
  assert.match(page,/mgt_update_assigned_delivery/)
 });
+
+test('all existing modules map to exactly one category and industry presets enable valid modules',async()=>{
+ const imported=async path=>import('data:text/javascript,'+encodeURIComponent(read(path)))
+ const [{MODULE_CATEGORIES,INDUSTRY_PRESETS,ROLE_TEMPLATES,modulePermissionMap,visibleModulesForRole}, {MODULE_CATALOG}]=await Promise.all([
+  imported('lib/workspaceCatalog.js'),imported('lib/platformConfig.js')
+ ])
+ const valid=new Set(MODULE_CATALOG.map(m=>m.id))
+ const grouped=MODULE_CATEGORIES.flatMap(c=>c.modules)
+ assert.equal(grouped.length,valid.size,'Every working module belongs in one category')
+ assert.equal(new Set(grouped).size,valid.size,'No duplicate module categories')
+ for(const key of grouped)assert.ok(valid.has(key),key)
+ for(const preset of INDUSTRY_PRESETS){
+  assert.ok(preset.modules.length>0,preset.id)
+  for(const key of preset.modules)assert.ok(valid.has(key),preset.id+': '+key)
+ }
+ for(const t of ROLE_TEMPLATES){
+  assert.ok(t.permissions.includes('dashboard.view'),t.key+' needs a usable dashboard')
+ }
+ assert.deepEqual(visibleModulesForRole(['inventory','sales'],['sales.create']),['sales'])
+ assert.deepEqual(visibleModulesForRole(['services'],['services.assigned']),['services'])
+ assert.ok(modulePermissionMap.fleet.includes('fleet.assigned'))
+});
