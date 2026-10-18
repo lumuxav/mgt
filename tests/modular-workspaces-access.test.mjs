@@ -75,3 +75,15 @@ test('owner can configure job templates, scopes, and preview the resulting modul
  assert.match(setup,/INDUSTRY_PRESETS/)
  assert.match(setup,/chooseIndustry/)
 })
+
+test('assigned drivers can update only allocated trips with proof and status limits',()=>{
+ const sql=read('supabase/migrations/20261018_0045_modular_staff_workspaces.sql')
+ const page=read('app/my-work/page.js')
+ assert.match(sql,/fleet.assigned/)
+ assert.match(sql,/mgt_update_assigned_delivery/)
+ assert.match(sql,/d.driver_user_id=v_me/)
+ assert.match(sql,/p_status not in \('in_transit','delivered','failed'\)/)
+ assert.match(sql,/Recipient name is required as proof of delivery/)
+ assert.match(page,/My assigned deliveries/)
+ assert.match(page,/mgt_update_assigned_delivery/)
+});

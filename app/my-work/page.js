@@ -11,7 +11,8 @@ export default function MyWorkPage(){
   const [context,setContext]=useState(null)
   const [business,setBusiness]=useState(null)
   const [grants,setGrants]=useState([])
-  const [data,setData]=useState({tasks:[],jobs:[],attendance:{}})
+  const [data,setData]=useState({tasks:[],jobs:[],deliveries:[],attendance:{}})
+  const [deliveryProof,setDeliveryProof]=useState({})
   const [loading,setLoading]=useState(true)
   const [busy,setBusy]=useState('')
   const [message,setMessage]=useState('')
@@ -32,7 +33,7 @@ export default function MyWorkPage(){
       setContext(ctx)
       setBusiness(authoritative)
       setGrants((permissions.data||[]).map(row=>row.permission))
-      setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],attendance:work.data?.attendance||{}})
+      setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],deliveries:work.data?.deliveries||[],attendance:work.data?.attendance||{}})
     }catch(error){setFailure(error?.message||'Could not load your work.')}finally{setLoading(false)}
   }
   useEffect(()=>{
@@ -71,9 +72,10 @@ export default function MyWorkPage(){
     </div><button type="button" className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold" onClick={()=>{setLoading(true);load()}}>Refresh</button></div>
     {failure&&<p role="alert" className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{failure}</p>}
     {message&&<p role="status" className="mb-4 rounded-xl border border-emerald-500/30 p-3 text-sm">{message}</p>}
-    <section className="grid gap-4 md:grid-cols-3">
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <div className="page-card p-5"><p className="text-sm text-muted">My open tasks</p><p className="mt-2 text-3xl font-black">{data.tasks.length}</p></div>
       <div className="page-card p-5"><p className="text-sm text-muted">My assigned service jobs</p><p className="mt-2 text-3xl font-black">{data.jobs.length}</p></div>
+      <div className="page-card p-5"><p className="text-sm text-muted">My deliveries</p><p className="mt-2 text-3xl font-black">{data.deliveries.length}</p></div>
       <div className="page-card p-5"><p className="text-sm text-muted">My attendance</p>
         <p className="mt-2 font-bold">{attendanceEnabled?(data.attendance.check_out?'Shift completed':data.attendance.check_in?'Clocked in':'Not clocked in'):'Managed by your workplace'}</p>
         {attendanceEnabled&&<div className="mt-3 flex flex-wrap gap-2">
@@ -102,6 +104,34 @@ export default function MyWorkPage(){
         </article>)}</div>}
       </div>
     </section>
+    {can('fleet.assigned')&&enable('fleet')&&<section className="page-card mt-6 p-5">
+      <h2 className="text-lg font-black">My assigned deliveries</h2>
+      <p className="mb-4 mt-1 text-xs text-muted">View allocated trips and record delivery evidence. Dispatch creation and reassignment remain manager-only.</p>
+      {data.deliveries.length===0?<p className="text-sm text-muted">No active deliveries assigned.</p>:
+        <div className="grid gap-3 md:grid-cols-2">{data.deliveries.map(d=>{
+          const proof=deliveryProof[d.id]||{recipient:'',notes:'',failure:''}
+          const setProof=changes=>setDeliveryProof(old=>({...old,[d.id]:{...(old[d.id]||{}),...changes}}))
+          const change=status=>run(d.id+status,()=>supabase.rpc('mgt_update_assigned_delivery',{
+            p_delivery_id:d.id,p_status:status,p_recipient_name:proof.recipient||null,
+            p_notes:proof.notes||null,p_failure_reason:proof.failure||null
+          }))
+          return <article key={d.id} className="rounded-xl border border-[var(--line)] p-4">
+            <strong>{d.number}</strong>
+            <p className="mt-1 text-sm">{d.destination}</p>
+            <p className="mt-1 text-xs text-muted">{pretty(d.status)}{d.contact_name?' · '+d.contact_name:''}{d.contact_phone?' · '+d.contact_phone:''}</p>
+            {['dispatched','in_transit'].includes(d.status)&&<div className="mt-3 grid gap-2">
+              <input className="input-base" placeholder="Recipient name (for successful delivery)" value={proof.recipient} onChange={e=>setProof({recipient:e.target.value})}/>
+              <input className="input-base" placeholder="Failure reason (if unsuccessful)" value={proof.failure} onChange={e=>setProof({failure:e.target.value})}/>
+              <textarea className="input-base" placeholder="Delivery notes" rows={2} value={proof.notes} onChange={e=>setProof({notes:e.target.value})}/>
+              <div className="flex flex-wrap gap-2">
+                {d.status==='dispatched'&&<button type="button" disabled={!!busy} className="btn-secondary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('in_transit')}>In transit</button>}
+                <button type="button" disabled={!!busy||!proof.recipient.trim()} className="btn-primary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('delivered')}>Confirm delivered</button>
+                <button type="button" disabled={!!busy||!proof.failure.trim()} className="btn-secondary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('failed')}>Report failed</button>
+              </div>
+            </div>}
+          </article>
+        })}</div>}
+    </section>}
     <section className="page-card mt-6 p-5"><h2 className="text-lg font-black">Your authorized workspaces</h2>
       {actions.length?<div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{actions.map(([href,label,detail])=><Link key={href} href={href} className="rounded-xl border border-[var(--line)] p-4"><strong>{label}</strong><p className="mt-1 text-xs text-muted">{detail}</p></Link>)}</div>:<p className="mt-3 text-sm text-muted">Ask your manager to enable a relevant module and assign a job role. Your personal work area is ready.</p>}
     </section>
