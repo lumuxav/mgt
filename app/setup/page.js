@@ -9,7 +9,6 @@ import {
   DEFAULT_BUSINESS_CONFIG,
   LOCATION_TYPES,
   MODULE_CATALOG,
-  getBusinessConfig,
   normalizeBusinessConfig,
   saveBusinessConfig,
   templateConfig,
@@ -19,6 +18,30 @@ import { isSavedLocation, matchSetupLocation } from '../../lib/setupLocations'
 
 const slug = () => Math.random().toString(36).slice(2, 8)
 
+// This page is intentionally outside AppShell for first-owner onboarding.
+// It therefore checks authorization itself, on entry AND again when saving.
+async function checkSetupAccess() {
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return { allowed: false, message: 'Sign in before configuring a business.' }
+
+  const { data: profile, error: profileError } = await supabase.from('users')
+    .select('organization_id, active, archived_at').eq('id', user.id).maybeSingle()
+  if (profileError) throw profileError
+  if (profile?.active === false || profile?.archived_at) {
+    return { allowed: false, message: 'This account has been disabled. Contact the owner.' }
+  }
+  // New verified founder: bootstrap_organization applies the server-side check.
+  if (!profile?.organization_id) return { allowed: true, organizationId: null }
+
+  const { data: grants, error: grantsError } = await supabase.rpc('current_permissions')
+  if (grantsError) throw grantsError
+  const allowed = new Set((grants || []).map(row => row.permission))
+  if (!allowed.has('settings.manage') || !allowed.has('locations.manage')) {
+    return { allowed: false, message: 'Only authorized business administrators can change modules and locations.' }
+  }
+  return { allowed: true, organizationId: profile.organization_id }
+}
+
 export default function BusinessSetupPage() {
   const router = useRouter()
   const [step, setStep] = useState(1)
@@ -26,16 +49,30 @@ export default function BusinessSetupPage() {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [backendStatus, setBackendStatus] = useState('')
+  const [access, setAccess] = useState({ state: 'checking', organizationId: null, message: '' })
 
   useEffect(() => {
     let mounted = true
     const hydrate = async () => {
-      const cached = getBusinessConfig()
-      if (mounted) setConfig(cached)
       try {
-        const databaseConfig = await loadBusinessConfigFromDatabase()
-        if (mounted && databaseConfig) setConfig(databaseConfig)
-      } catch {}
+        const checked = await checkSetupAccess()
+        if (!mounted) return
+        if (!checked.allowed) {
+          setAccess({ state: 'denied', organizationId: null, message: checked.message })
+          return
+        }
+        if (checked.organizationId) {
+          // Do not display another business's cached configuration.
+          const databaseConfig = await loadBusinessConfigFromDatabase()
+          if (!databaseConfig) throw new Error('Could not load the business configuration. Reconnect and try again.')
+          if (mounted) setConfig(databaseConfig)
+        } else {
+          setConfig(DEFAULT_BUSINESS_CONFIG)
+        }
+        if (mounted) setAccess({ state: 'ready', organizationId: checked.organizationId, message: '' })
+      } catch (error) {
+        if (mounted) setAccess({ state: 'denied', organizationId: null, message: error?.message || 'Could not verify your permissions.' })
+      }
     }
     hydrate()
     return () => { mounted = false }
@@ -94,6 +131,7 @@ export default function BusinessSetupPage() {
   }
 
   const finish = async () => {
+    if (access.state !== 'ready') return
     setSaving(true)
     setBackendStatus('')
     const businessName = config.businessName.trim() || 'My Business'
@@ -109,14 +147,12 @@ export default function BusinessSetupPage() {
       if (!normalized.locations.some(item => item.active !== false)) throw new Error('Keep at least one active location.')
       const names = normalized.locations.map(item => item.name.trim().toLowerCase())
       if (names.some(name => !name) || new Set(names).size !== names.length) throw new Error('Give each location a unique, non-empty name.')
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        const cached = saveBusinessConfig(normalized)
-        setConfig(cached)
-        setSaved(true)
-        setBackendStatus('Saved on this device. Sign in to store this configuration centrally for the business.')
-        return
+      const freshAccess = await checkSetupAccess()
+      if (!freshAccess.allowed || freshAccess.organizationId !== access.organizationId) {
+        throw new Error('Your business permissions changed. Reopen Setup or contact the owner.')
       }
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Session expired. Sign in again.')
 
       const profileResult = await supabase
         .from('users')
@@ -221,6 +257,16 @@ export default function BusinessSetupPage() {
       setSaving(false)
     }
   }
+
+  if (access.state !== 'ready') return (
+    <main className="page-wrap setup-page mgt-standalone-safe-page">
+      <section className="page-card mx-auto max-w-xl p-6" role={access.state === 'denied' ? 'alert' : 'status'}>
+        <h1 className="page-title">{access.state === 'checking' ? 'Checking business access' : 'Business setup is restricted'}</h1>
+        <p className="mt-3 text-sm text-muted">{access.state === 'checking' ? 'Verifying your account and permissions...' : access.message}</p>
+        {access.state === 'denied' && <button type="button" onClick={() => router.replace('/')} className="btn-primary mt-5 rounded-xl px-4 py-3 text-sm font-bold">Back to workspace</button>}
+      </section>
+    </main>
+  )
 
   return (
     <main className="page-wrap setup-page mgt-standalone-safe-page">
