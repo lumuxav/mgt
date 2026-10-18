@@ -246,3 +246,10 @@ Before a production release:
 5. configure Android signing for stable APK/AAB distribution
 6. configure Apple signing before physical iOS/App Store distribution
 7. complete final cross-device acceptance testing
+
+
+## Owner signup and Supabase email configuration
+
+MGT signup explicitly redirects confirmation emails to `https://mgt-lake.vercel.app/login` and password recovery to `https://mgt-lake.vercel.app/reset-password`. Keep Supabase email confirmation, existing owner bootstrap and role checks enabled. In Supabase project `mehuiivevjqmwvaapbgz`, **Authentication → URL Configuration**, set the Site URL to `https://mgt-lake.vercel.app` and allow the exact MGT login and reset-password redirect paths. Check any custom email templates for hard-coded Vercel login links. Supabase's default email sender has strict limits; configure verified custom SMTP before sustained public signups. Signup errors caused by email quotas are not Vercel or database outages.
+
+See [owner account guidance](docs/MGT_OWNER_AUTH_AND_BRAND.md). The approved orange-growth MGT icon is supplied separately and must replace launcher, website, mobile and desktop assets together before publication of the next release.
