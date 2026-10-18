@@ -115,3 +115,20 @@ begin
   return org_id;
 end;
 $function$;
+
+-- Browser clients may inspect authorized records but must never directly
+-- create/delete staff or bypass the audited role-management RPC.
+-- SECURITY DEFINER bootstrap and service-role API operations remain available.
+drop policy if exists users_admin_insert on public.users;
+drop policy if exists users_admin_delete on public.users;
+drop policy if exists roles_org_insert on public.roles;
+drop policy if exists roles_org_update on public.roles;
+drop policy if exists roles_org_delete on public.roles;
+drop policy if exists role_permissions_org_access on public.role_permissions;
+drop policy if exists role_permissions_org_select on public.role_permissions;
+create policy role_permissions_org_select on public.role_permissions
+for select to authenticated
+using (
+  public.has_organization_access(organization_id)
+  and public.current_user_role() in ('owner','admin','super_admin','system_admin')
+);
