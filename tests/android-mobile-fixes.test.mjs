@@ -16,7 +16,9 @@ test('Android viewport overrides are gated to the native Android Capacitor envir
 
 test('the More sheet closes when tapping any module and when pressing Escape', () => {
   const shell = read('app/components/AppShell.js')
-  assert.equal((shell.match(/href=\{item\.href\} onClick=\{\(\)=>setMobileMenuOpen\(false\)\}/g) || []).length, 2)
+  assert.equal((shell.match(/href=\{item\.href\} onClick=\{\(\)=>setMobileMenuOpen\(false\)\}/g) || []).length, 3)
+  assert.match(shell, /moduleNavigation\.map\(category/)
+  assert.match(shell, /personalNavigation\.map\(item/)
   assert.match(shell, /event\.key === 'Escape'/)
   assert.match(shell, /href="\/users" onClick=\{\(\)=>setMobileMenuOpen\(false\)\}/)
 })

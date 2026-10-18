@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { adminApi } from '../../lib/adminApi'
+import { getBusinessConfig } from '../../lib/platformConfig'
+import { ROLE_TEMPLATES, visibleModulesForRole } from '../../lib/workspaceCatalog'
 
 const prettyDate = (value) => value ? new Date(value).toLocaleString() : 'Never'
 const prettyRole = (key, roles) => roles.find((role) => role.key === key)?.name || String(key || 'Employee').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -23,7 +25,8 @@ export default function UsersPage() {
   const [message, setMessage] = useState(null)
   const [rowMessages, setRowMessages] = useState({})
   const [invite, setInvite] = useState({ full_name: '', email: '', role: 'employee', default_location_id: '' })
-  const [newRole, setNewRole] = useState({ name: '', description: '' })
+  const [newRole, setNewRole] = useState({ name: '', description: '', template: '' })
+  const [staffAccessDrafts, setStaffAccessDrafts] = useState({})
 
   const callUsers = (method = 'GET', body) => adminApi('/api/admin/users', {
     method,
@@ -48,6 +51,9 @@ export default function UsersPage() {
 
     setCaller(usersResult.caller)
     setUsers(usersResult.users || [])
+    setStaffAccessDrafts(Object.fromEntries((usersResult.users||[]).map(u=>[u.id,{
+      additional_roles:u.additional_roles||[],scope:u.work_scope?.scope||'organization',location_id:u.work_scope?.location_id||''
+    }])))
     setRoles(usersResult.roles || [])
     setLocations(usersResult.locations || [])
     setInvitations(usersResult.invitations || [])
@@ -113,18 +119,40 @@ export default function UsersPage() {
     }
   }
 
+  const saveStaffWorkAccess = async (user) => {
+    const draft = staffAccessDrafts[user.id]
+    if (!draft) return
+    setBusy(true)
+    const result=await adminApi('/api/admin/staff-work-access',{
+      method:'PATCH',
+      body:JSON.stringify({user_id:user.id,additional_roles:draft.additional_roles,scope:draft.scope,location_id:draft.location_id||null})
+    })
+    if(result.ok){
+      setRowMessages(current=>({...current,[user.id]:{type:'success',text:'Job roles and work scope saved.'}}))
+      await load()
+    }else{
+      setRowMessages(current=>({...current,[user.id]:{type:'error',text:result.error||'Could not save work access.'}}))
+    }
+    setBusy(false)
+  }
+  const changeStaffDraft = (userId, changes) => {
+    setStaffAccessDrafts(old=>({...old,[userId]:{...(old[userId]||{}),...changes}}))
+  }
   const createRole = async (event) => {
     event.preventDefault()
     if (!newRole.name.trim()) return
     setBusy(true)
-    const result = await callRoles('POST', { ...newRole, permissions: [] })
+    const template=ROLE_TEMPLATES.find(entry=>entry.key===newRole.template)
+    const allowed=new Set(permissions.map(p=>p.code))
+    const selected=(template?.permissions||[]).filter(code=>allowed.has(code))
+    const result = await callRoles('POST', { name:newRole.name,description:newRole.description, permissions:selected })
     if (result.ok) {
       setRoleBundle(result.roles || [])
       setPermissions(result.permissions || [])
       const created = (result.roles || []).find((role) => role.name === newRole.name.trim())
       if (created) setSelectedRoleKey(created.key)
-      setNewRole({ name: '', description: '' })
-      setMessage({ type: 'success', text: 'Custom role created. Now choose its permissions.' })
+      setNewRole({ name: '', description: '', template: '' })
+      setMessage({ type: 'success', text: 'Custom role created with its starting work permissions.' })
     } else {
       setMessage({ type: 'error', text: result.error || 'Could not create role.' })
     }
@@ -178,6 +206,9 @@ export default function UsersPage() {
   const pendingCount = invitations.length
   const selectedRole = roleBundle.find((role) => role.key === selectedRoleKey)
   const callerCanAssignOwner = ['owner', 'super_admin', 'system_admin'].includes(caller?.role)
+  const enabledModules=getBusinessConfig().enabledModules||[]
+  const permissionCodes = new Set(permissions.map(item=>item.code))
+  const templateSuggestions = ROLE_TEMPLATES.map(t=>({...t,permissions:t.permissions.filter(code=>permissionCodes.has(code))}))
 
   if (loading) return <main className="page-wrap text-muted">Loading staff access...</main>
 
@@ -275,6 +306,41 @@ export default function UsersPage() {
                       <button type="button" disabled={user.id === caller?.id} onClick={() => archiveUser(user)} className="rounded-xl border border-red-500/40 px-3 py-2 text-xs font-bold text-red-500 disabled:opacity-30">Archive</button>
                     </div>
                   </div>
+                  {canManageRoles && user.id!==caller?.id && user.role!=='owner' && (
+                    <div className="mt-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                      <p className="text-sm font-black">Combined job roles &amp; work scope</p>
+                      <p className="mt-1 text-xs text-muted">Add job capabilities without granting ownership. Scope restricts sales and service orders; other modules continue to use their existing controls.</p>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-xs font-bold">Record scope
+                          <select className="input-base mt-1" value={staffAccessDrafts[user.id]?.scope||'organization'}
+                            onChange={e=>changeStaffDraft(user.id,{scope:e.target.value})}>
+                            <option value="organization">Whole business (existing access)</option>
+                            <option value="location">Selected location only</option>
+                            <option value="assigned">My sales / assigned jobs only</option>
+                          </select>
+                        </label>
+                        {staffAccessDrafts[user.id]?.scope==='location'&&<label className="text-xs font-bold">Permitted location
+                          <select className="input-base mt-1" value={staffAccessDrafts[user.id]?.location_id||''}
+                            onChange={e=>changeStaffDraft(user.id,{location_id:e.target.value})}>
+                            <option value="">Select a location</option>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+                          </select>
+                        </label>}
+                      </div>
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {roles.filter(r=>r.key!==user.role&&!['owner','admin','super_admin','system_admin'].includes(r.key)).map(r=><label key={r.key} className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={(staffAccessDrafts[user.id]?.additional_roles||[]).includes(r.key)}
+                            onChange={e=>changeStaffDraft(user.id,{additional_roles:e.target.checked?
+                              [...(staffAccessDrafts[user.id]?.additional_roles||[]),r.key]:
+                              (staffAccessDrafts[user.id]?.additional_roles||[]).filter(v=>v!==r.key)})}/>
+                          {r.name}
+                        </label>)}
+                      </div>
+                      <button type="button" disabled={busy||staffAccessDrafts[user.id]?.scope==='location'&&!staffAccessDrafts[user.id]?.location_id}
+                        onClick={()=>saveStaffWorkAccess(user)} className="btn-secondary mt-4 rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50">
+                        Save work access
+                      </button>
+                    </div>
+                  )}
                   {rowMessages[user.id] && <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${rowMessages[user.id].type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' : 'border-red-500/30 bg-red-500/10 text-red-500'}`}>{rowMessages[user.id].text}</div>}
                 </article>
               ))}
@@ -291,6 +357,13 @@ export default function UsersPage() {
               <p className="mt-1 text-xs text-muted">Useful when the built-in roles do not exactly match a business.</p>
               <input required className="input-base mt-4" placeholder="Role name" value={newRole.name} onChange={(event) => setNewRole({ ...newRole, name: event.target.value })} />
               <textarea className="input-base mt-3 min-h-20" placeholder="What is this role responsible for?" value={newRole.description} onChange={(event) => setNewRole({ ...newRole, description: event.target.value })} />
+              <label className="mt-3 block text-xs font-bold">Start with job responsibilities
+                <select className="input-base mt-1" value={newRole.template} onChange={event=>setNewRole({...newRole,template:event.target.value})}>
+                  <option value="">Blank custom role</option>
+                  {templateSuggestions.map(template=><option key={template.key} value={template.key}>{template.label}</option>)}
+                </select>
+              </label>
+              {newRole.template&&<p className="mt-2 text-xs text-muted">{templateSuggestions.find(t=>t.key===newRole.template)?.description}</p>}
               <button disabled={busy} className="btn-primary mt-3 w-full rounded-xl px-4 py-3 text-sm font-black disabled:opacity-50">Create role</button>
             </form>
 
@@ -326,6 +399,22 @@ export default function UsersPage() {
                   </div>
                 ) : (
                   <>
+                    <div className="mb-5 grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-bold">Apply a job template to this draft
+                        <select className="input-base mt-2" defaultValue="" onChange={event=>{
+                          const template=templateSuggestions.find(t=>t.key===event.target.value)
+                          if(template)setRoleDraft(template.permissions)
+                          event.target.value=''
+                        }}>
+                          <option value="">Choose template...</option>
+                          {templateSuggestions.map(t=><option key={t.key} value={t.key}>{t.label}</option>)}
+                        </select>
+                      </label>
+                      <div className="rounded-xl bg-[var(--panel-2)] p-3 text-xs">
+                        <strong>{roleDraft.length} permitted actions</strong>
+                        <p className="mt-1 text-muted">Preview modules before saving. Your saved permissions are unchanged until you press Save.</p>
+                      </div>
+                    </div>
                     <div className="space-y-5">
                       {Object.entries(groupedPermissions).map(([section, items]) => (
                         <div key={section}>
@@ -344,6 +433,15 @@ export default function UsersPage() {
                         </div>
                       ))}
                     </div>
+                    <section className="mt-5 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-4">
+                      <h3 className="font-black">Preview this role's workspace</h3>
+                      <p className="mt-1 text-xs text-muted">Navigation preview only: no impersonation and no access to another worker's data.</p>
+                      <div className="mt-3 flex flex-wrap gap-2">{visibleModulesForRole(enabledModules,roleDraft).map(module=>
+                        <span key={module} className="rounded-full border border-[var(--line)] px-3 py-1 text-xs font-bold">{module.replaceAll('_',' ')}</span>)}
+                        {visibleModulesForRole(enabledModules,roleDraft).length===0&&<p className="text-xs text-muted">No activated modules match these permissions. Turn on the required modules in Business Setup.</p>}
+                      </div>
+                      {roleDraft.includes('services.assigned')&&<p className="mt-2 text-xs">Assigned service work appears under My Work when Services is enabled.</p>}
+                    </section>
                     <button type="button" disabled={busy} onClick={saveRolePermissions} className="btn-primary mt-6 rounded-xl px-5 py-3 text-sm font-black disabled:opacity-50">{busy ? 'Saving...' : 'Save permissions'}</button>
                   </>
                 )}

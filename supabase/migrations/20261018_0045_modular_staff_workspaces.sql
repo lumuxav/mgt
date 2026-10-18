@@ -1,0 +1,564 @@
+-- MGT modular workspaces: additive, reversible access architecture.
+-- Existing roles and customized owner grants are never overwritten.
+insert into public.permission_catalog(code,section,label,description,sort_order) values
+('services.assigned','Operations','Work on assigned service jobs','See and update only service jobs assigned to this user',93),
+('workspace.tasks','Workspace','View own work dashboard','Personal tasks and attendance dashboard',11),
+('fleet.assigned','Assets & Fleet','Complete assigned deliveries','Update only delivery trips allocated to your account',66)
+on conflict (code) do nothing;
+
+-- Role combination permissions are additive; primary roles remain unchanged.
+create table if not exists public.user_additional_roles (
+ organization_id uuid not null references public.organizations(id) on delete cascade,
+ user_id uuid not null references public.users(id) on delete cascade,
+ role text not null,
+ granted_by uuid references public.users(id),
+ created_at timestamptz not null default now(),
+ primary key(organization_id,user_id,role),
+ constraint no_privileged_extra_role check(role not in ('owner','admin','super_admin','system_admin'))
+);
+create index if not exists user_additional_roles_member_idx on public.user_additional_roles(user_id,organization_id);
+alter table public.user_additional_roles enable row level security;
+drop policy if exists additional_roles_read on public.user_additional_roles;
+create policy additional_roles_read on public.user_additional_roles for select to authenticated
+using(public.has_organization_access(organization_id) and
+(user_id=auth.uid() or public.has_permission('users.manage')));
+revoke all on public.user_additional_roles from anon,authenticated;
+grant select on public.user_additional_roles to authenticated;
+
+create table if not exists public.user_work_scope (
+ organization_id uuid not null references public.organizations(id) on delete cascade,
+ user_id uuid not null references public.users(id) on delete cascade,
+ scope text not null default 'organization' check(scope in ('organization','location','assigned')),
+ location_id uuid references public.locations(id),
+ updated_by uuid references public.users(id),
+ updated_at timestamptz not null default now(),
+ primary key(organization_id,user_id),
+ constraint scoped_location_required check(scope <> 'location' or location_id is not null)
+);
+alter table public.user_work_scope enable row level security;
+drop policy if exists work_scope_read on public.user_work_scope;
+create policy work_scope_read on public.user_work_scope for select to authenticated
+using(public.has_organization_access(organization_id) and
+(user_id=auth.uid() or public.has_permission('users.manage')));
+revoke all on public.user_work_scope from anon,authenticated;
+grant select on public.user_work_scope to authenticated;
+
+create or replace function public.mgt_current_roles()
+returns table(role text) language sql stable security definer set search_path=public as $$
+ select public.current_user_role() where public.current_user_role() is not null
+ union
+ select ar.role from public.user_additional_roles ar join public.roles r
+ on r.organization_id=ar.organization_id and r.key=ar.role and r.active
+ where ar.organization_id=public.current_organization_id() and ar.user_id=auth.uid()
+   and public.current_user_role() is not null
+$$;
+revoke all on function public.mgt_current_roles() from public,anon;
+grant execute on function public.mgt_current_roles() to authenticated,service_role;
+
+create or replace function public.current_permissions()
+returns table(permission text) language sql stable security definer set search_path=public as $$
+ select pc.code from public.permission_catalog pc
+ where public.current_user_role() in ('owner','admin','super_admin','system_admin')
+ union
+ select rp.permission from public.role_permissions rp
+ where rp.organization_id=public.current_organization_id() and rp.allowed
+ and rp.role in (select role from public.mgt_current_roles())
+ union
+ select 'workspace.tasks'::text where public.current_user_role() is not null
+$$;
+create or replace function public.has_permission(permission_key text)
+returns boolean language sql stable security definer set search_path=public as $$
+ select permission_key in (select permission from public.current_permissions())
+$$;
+
+-- Personal work feed exposes only nonfinancial fields and only work allocated to the member.
+create or replace function public.mgt_my_work()
+returns jsonb language plpgsql stable security definer set search_path=public as $$
+declare v_org uuid:=public.current_organization_id(); v_me uuid:=auth.uid();
+ v_tasks jsonb:='[]'::jsonb; v_jobs jsonb:='[]'::jsonb; v_deliveries jsonb:='[]'::jsonb;
+ v_attendance jsonb:='{}'::jsonb; v_tz text;
+begin
+ if v_org is null or v_me is null then raise exception 'Active staff account required'; end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='projects' and enabled)
+    and (public.has_permission('projects.time') or public.has_permission('projects.view')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',t.id,'project_id',t.project_id,'title',t.title,'status',t.status,
+      'priority',t.priority,'due_date',t.due_date,'progress',t.progress_percent
+    ) order by t.due_date nulls last),'[]'::jsonb) into v_tasks
+    from public.project_tasks t where t.organization_id=v_org and t.assigned_user_id=v_me
+    and t.status not in ('cancelled','completed');
+ end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='services' and enabled)
+    and (public.has_permission('services.assigned') or public.has_permission('services.view') or public.has_permission('services.manage')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',w.id,'number',w.job_number,'title',w.title,'status',w.status,'priority',w.priority,'due_at',w.due_at
+    ) order by w.due_at nulls last),'[]'::jsonb) into v_jobs
+    from public.work_orders w where w.organization_id=v_org
+    and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
+    and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true)
+    and w.status not in ('cancelled','completed');
+ end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='fleet' and enabled)
+    and (public.has_permission('fleet.assigned') or public.has_permission('fleet.dispatch')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',d.id,'number',d.delivery_number,'destination',d.destination,'status',d.status,
+      'scheduled_at',d.scheduled_at,'contact_name',d.contact_name,'contact_phone',d.contact_phone
+    ) order by d.scheduled_at nulls last),'[]'::jsonb) into v_deliveries
+    from public.deliveries d where d.organization_id=v_org and d.driver_user_id=v_me
+    and d.status not in ('delivered','failed','cancelled')
+    and public.mgt_record_scope_allows(v_org,d.source_location_id,d.driver_user_id,true);
+ end if;
+ if public.has_permission('attendance.use') then
+    select timezone into v_tz from public.organizations where id=v_org;
+    select coalesce(jsonb_build_object('check_in',a.check_in,'check_out',a.check_out,'date',a.work_date),'{}'::jsonb)
+    into v_attendance from public.attendance a where a.organization_id=v_org and a.user_id=v_me
+      and a.work_date=(now() at time zone coalesce(v_tz,'UTC'))::date limit 1;
+ end if;
+ return jsonb_build_object('tasks',v_tasks,'jobs',v_jobs,'deliveries',v_deliveries,'attendance',coalesce(v_attendance,'{}'::jsonb));
+end; $$;
+revoke all on function public.mgt_my_work() from public,anon;
+grant execute on function public.mgt_my_work() to authenticated,service_role;
+
+-- Technician updates only assigned jobs and cannot complete, reopen, price or cancel jobs.
+create or replace function public.mgt_update_assigned_job(p_work_order_id uuid,p_status text)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_org uuid:=public.current_organization_id();v_me uuid:=auth.uid();v_previous text;v_location uuid;
+begin
+ if v_org is null or not(public.has_permission('services.assigned') or public.has_permission('services.manage'))
+ then raise exception 'Permission denied: assigned service job'; end if;
+ if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='services' and enabled)
+ then raise exception 'Services module not enabled'; end if;
+ if p_status not in ('in_progress','on_hold') then raise exception 'Unsupported job progress action'; end if;
+ select w.status,w.location_id into v_previous,v_location from public.work_orders w where w.id=p_work_order_id and w.organization_id=v_org
+ and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
+ and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true) for update;
+ if not found then raise exception 'Job is not assigned to you'; end if;
+ if v_previous not in ('open','scheduled','in_progress','on_hold') then raise exception 'This job cannot be updated'; end if;
+ update public.work_orders set status=p_status,
+ started_at=case when p_status='in_progress' then coalesce(started_at,now()) else started_at end,
+ updated_at=now() where id=p_work_order_id;
+ insert into public.work_order_events(organization_id,work_order_id,event_type,description,metadata,user_id)
+ values(v_org,p_work_order_id,'staff_progress','Assigned technician updated job progress',
+ jsonb_build_object('old',v_previous,'new',p_status),v_me);
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(v_org,v_location,v_me,'assigned_service_progress','work_order',p_work_order_id::text,
+ 'Assigned worker changed service status',jsonb_build_object('from_status',v_previous,'to_status',p_status));
+ return jsonb_build_object('id',p_work_order_id,'status',p_status);
+end; $$;
+revoke all on function public.mgt_update_assigned_job(uuid,text) from public,anon;
+grant execute on function public.mgt_update_assigned_job(uuid,text) to authenticated,service_role;
+
+-- Do not overwrite role customizations. Add usable personal permission only.
+insert into public.role_permissions(organization_id,role,permission,allowed)
+select r.organization_id,r.key,'workspace.tasks',true from public.roles r
+where r.active on conflict(organization_id,role,permission) do nothing;
+insert into public.role_permissions(organization_id,role,permission,allowed)
+select r.organization_id,r.key,'services.assigned',true from public.roles r
+where r.key in ('employee','production_staff') and r.active
+on conflict(organization_id,role,permission) do nothing;
+
+-- Atomically save an employee's additional (nonadministrator) roles and
+-- optional sales/service record scope; callers cannot modify themselves.
+create or replace function public.server_set_staff_work_access(
+ p_organization_id uuid,p_actor_id uuid,p_user_id uuid,
+ p_roles text[],p_scope text,p_location_id uuid default null
+) returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_actor public.users%rowtype;v_target public.users%rowtype;
+begin
+ if coalesce(auth.role(),'')<>'service_role' then raise exception 'Server access required'; end if;
+ if p_actor_id=p_user_id then raise exception 'Cannot alter your own additional roles'; end if;
+ select * into v_actor from public.users
+  where id=p_actor_id and organization_id=p_organization_id and active and archived_at is null;
+ if not found then raise exception 'Active business administrator required'; end if;
+ if v_actor.role not in ('owner','admin','super_admin','system_admin')
+  and not(
+    exists(select 1 from public.role_permissions where organization_id=p_organization_id and role=v_actor.role and permission='users.manage' and allowed)
+    and exists(select 1 from public.role_permissions where organization_id=p_organization_id and role=v_actor.role and permission='roles.manage' and allowed)
+  ) then raise exception 'Insufficient staff administration permissions'; end if;
+ select * into v_target from public.users
+ where id=p_user_id and organization_id=p_organization_id and archived_at is null for update;
+ if not found then raise exception 'Staff account not found'; end if;
+ if v_target.role in ('owner','super_admin','system_admin') and v_actor.role not in ('owner','super_admin','system_admin')
+ then raise exception 'Only business owner may manage another owner'; end if;
+ if p_scope not in ('organization','location','assigned') then raise exception 'Invalid work scope'; end if;
+ if p_scope='location' and not exists(
+  select 1 from public.locations where organization_id=p_organization_id and id=p_location_id and active
+ ) then raise exception 'Choose an active location in this business'; end if;
+ if coalesce(array_length(p_roles,1),0)>10 then raise exception 'Too many additional roles'; end if;
+ if exists(select 1 from unnest(coalesce(p_roles,array[]::text[])) role_key
+ where role_key in ('owner','admin','super_admin','system_admin') or role_key=v_target.role
+ or not exists(select 1 from public.roles r where r.organization_id=p_organization_id and r.key=role_key and r.active))
+ then raise exception 'Invalid additional role'; end if;
+ delete from public.user_additional_roles where organization_id=p_organization_id and user_id=p_user_id;
+ insert into public.user_additional_roles(organization_id,user_id,role,granted_by)
+ select p_organization_id,p_user_id,role_key,p_actor_id from
+ (select distinct unnest(coalesce(p_roles,array[]::text[])) role_key) roles;
+ insert into public.user_work_scope(organization_id,user_id,scope,location_id,updated_by,updated_at)
+ values(p_organization_id,p_user_id,p_scope,case when p_scope='location' then p_location_id else null end,p_actor_id,now())
+ on conflict(organization_id,user_id) do update set scope=excluded.scope,
+ location_id=excluded.location_id,updated_by=excluded.updated_by,updated_at=now();
+ insert into public.audit_log(organization_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(p_organization_id,p_actor_id,'staff_work_access_changed','user',p_user_id::text,
+ 'Staff work roles and access scope updated',jsonb_build_object('roles',p_roles,'scope',p_scope,'location_id',p_location_id));
+ return jsonb_build_object('ok',true);
+end; $$;
+revoke all on function public.server_set_staff_work_access(uuid,uuid,uuid,text[],text,uuid) from public,anon,authenticated;
+grant execute on function public.server_set_staff_work_access(uuid,uuid,uuid,text[],text,uuid) to service_role;
+
+-- Enforce location or assigned-only visibility for sales and service orders.
+-- Existing workers have no scope row and retain their established access.
+create or replace function public.mgt_record_scope_allows(
+ p_org uuid,p_location uuid,p_owner uuid,p_secondary_assignment boolean default false
+) returns boolean language sql stable security definer set search_path=public as $$
+ select coalesce((
+ select case s.scope
+   when 'organization' then true
+   when 'location' then s.location_id=p_location
+   when 'assigned' then p_owner=auth.uid() or p_secondary_assignment
+   else false end
+ from public.user_work_scope s where s.organization_id=p_org and s.user_id=auth.uid()
+ ),true)
+$$;
+revoke all on function public.mgt_record_scope_allows(uuid,uuid,uuid,boolean) from public,anon;
+grant execute on function public.mgt_record_scope_allows(uuid,uuid,uuid,boolean) to authenticated,service_role;
+
+drop policy if exists sales_org_select on public.sales;
+create policy sales_org_select on public.sales for select to authenticated using(
+ public.has_organization_access(organization_id) and public.has_permission('sales.view')
+ and public.mgt_record_scope_allows(organization_id,location_id,sold_by,false)
+);
+-- Break work_orders <-> work_order_assignments RLS policy recursion by
+-- checking assignment membership inside this narrowly scoped definer function.
+create or replace function public.mgt_is_work_order_assignee(p_work_order_id uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+ select public.current_organization_id() is not null
+ and exists(
+  select 1 from public.work_orders w
+  join public.work_order_assignments wa on wa.work_order_id=w.id
+  where w.id=p_work_order_id and w.organization_id=public.current_organization_id()
+    and wa.user_id=auth.uid()
+ )
+$$;
+revoke all on function public.mgt_is_work_order_assignee(uuid) from public,anon;
+grant execute on function public.mgt_is_work_order_assignee(uuid) to authenticated,service_role;
+
+drop policy if exists work_orders_select on public.work_orders;
+create policy work_orders_select on public.work_orders for select to authenticated using(
+ public.has_organization_access(organization_id)
+ and (
+    public.has_permission('services.view')
+    or public.has_permission('services.manage')
+    or (public.has_permission('services.assigned') and (
+      assigned_to=auth.uid() or public.mgt_is_work_order_assignee(work_orders.id)
+    ))
+ )
+ and public.mgt_record_scope_allows(organization_id,location_id,assigned_to,
+    public.mgt_is_work_order_assignee(work_orders.id))
+);
+
+-- New staff receive a conservative, job-shaped scope from day one.
+-- Existing members with no record retain their previous organization scope.
+create or replace function public.mgt_initialize_staff_scope()
+returns trigger language plpgsql security definer set search_path=public as $$
+declare v_scope text:='organization';v_location uuid:=null;
+begin
+ if new.organization_id is null then return new; end if;
+ if new.role in ('employee','technician','project_worker') then
+    v_scope:='assigned';
+ elsif new.role in ('cashier','salesperson','storekeeper','branch_manager')
+    and new.default_location_id is not null then
+    v_scope:='location';
+    v_location:=new.default_location_id;
+ end if;
+ insert into public.user_work_scope(organization_id,user_id,scope,location_id)
+ values(new.organization_id,new.id,v_scope,v_location)
+ on conflict(organization_id,user_id) do nothing;
+ return new;
+end; $$;
+drop trigger if exists mgt_initialize_staff_scope_on_create on public.users;
+create trigger mgt_initialize_staff_scope_on_create
+after insert on public.users for each row execute function public.mgt_initialize_staff_scope();
+revoke all on function public.mgt_initialize_staff_scope() from public,anon,authenticated;
+
+-- Initial default role templates for new businesses. Role grants remain
+-- customizable and existing company-specific grants are never overwritten.
+insert into public.default_role_permission_templates(role,permission) values
+('employee','workspace.tasks'),
+('employee','services.assigned'),
+('production_staff','workspace.tasks'),
+('technician','workspace.tasks'),
+('technician','services.assigned'),
+('technician','attendance.use'),
+('project_worker','workspace.tasks'),
+('project_worker','projects.time'),
+('project_worker','attendance.use')
+on conflict do nothing;
+
+-- Existing organizations keep present approval workflow until the owner opts in.
+alter table public.organizations
+add column if not exists require_separate_approvers boolean not null default false;
+
+-- The original review transaction logic is retained; just require another
+-- authorized approver when the business explicitly enables two-person review.
+CREATE OR REPLACE FUNCTION public.review_approval_request(p_request_id uuid, p_decision text, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_req public.approval_requests%rowtype;
+ v_product public.products%rowtype;
+ v_product_id uuid;
+ v_delta numeric(18,3);
+ v_reason text;
+ v_current numeric(18,3);
+ v_new numeric(18,3);
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not public.has_permission('approvals.manage') then raise exception 'Permission denied: approvals.manage'; end if;
+ if p_decision not in ('approved','rejected') then raise exception 'Decision must be approved or rejected'; end if;
+
+ select * into v_req from public.approval_requests
+ where id=p_request_id and organization_id=v_org and status='pending' for update;
+ if not found then raise exception 'Pending approval request not found'; end if;
+ if (select coalesce(require_separate_approvers,false) from public.organizations where id=v_org)
+    and v_req.requested_by=auth.uid() then
+   raise exception 'A different authorized staff member must approve this request';
+ end if;
+
+ if v_req.request_type='purchase_order' then
+  update public.purchases
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'ordered' else 'rejected' end,
+       updated_at=now()
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='production_order' then
+  update public.production_orders
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'planned' else 'rejected' end
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='stock_adjustment' and p_decision='approved' then
+  v_product_id:=(v_req.metadata->>'product_id')::uuid;
+  v_delta:=(v_req.metadata->>'quantity_delta')::numeric;
+  v_reason:=coalesce(v_req.metadata->>'reason','adjustment');
+
+  select * into v_product from public.products
+   where id=v_product_id and organization_id=v_org and active=true and track_inventory=true;
+  if not found then raise exception 'Adjustment product no longer available'; end if;
+
+  insert into public.stock_balances(product_id,location_id,quantity,reserved_quantity)
+   values(v_product_id,v_req.location_id,0,0) on conflict(product_id,location_id) do nothing;
+
+  select quantity into v_current from public.stock_balances
+   where product_id=v_product_id and location_id=v_req.location_id for update;
+
+  v_new:=coalesce(v_current,0)+v_delta;
+  if v_new<0 then raise exception 'Approved adjustment would create negative stock'; end if;
+
+  update public.stock_balances set quantity=v_new,updated_at=now()
+   where product_id=v_product_id and location_id=v_req.location_id;
+
+  insert into public.stock_movements(
+   organization_id,location_id,product_id,movement_type,quantity,unit_cost,reference_type,reference_id,notes,recorded_by
+  )
+  values(
+   v_org,v_req.location_id,v_product_id,v_reason,v_delta,v_product.cost_price,
+   'approved_adjustment',v_req.id,coalesce(v_req.metadata->>'notes',p_notes),auth.uid()
+  );
+ end if;
+
+ update public.approval_requests
+ set status=p_decision,reviewed_by=auth.uid(),review_notes=p_notes,reviewed_at=now()
+ where id=v_req.id;
+
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(
+  v_org,v_req.location_id,auth.uid(),'approval_'||p_decision,'approval_request',v_req.id::text,v_req.title,
+  jsonb_build_object('request_type',v_req.request_type,'entity_id',v_req.entity_id,'review_notes',p_notes)
+ );
+
+ return jsonb_build_object('approval_request_id',v_req.id,'status',p_decision,'request_type',v_req.request_type);
+end; $function$;
+
+-- Additional practical job types are available to each business out of the box.
+-- These inserts never overwrite existing custom grants or role descriptions.
+insert into public.roles(organization_id,key,name,description,is_system,active)
+select o.id,v.key,v.name,v.description,true,true from public.organizations o
+cross join (values
+ ('procurement_officer','Procurement Officer','Purchasing, suppliers and receiving'),
+ ('hr_officer','HR Officer','People, attendance, leave and pay records'),
+ ('technician','Technician','Assigned service work and timesheets'),
+ ('delivery_driver','Delivery Driver','Dispatch and delivery progress'),
+ ('project_worker','Project Worker','Assigned tasks and time recording'),
+ ('branch_manager','Branch Manager','Branch operational oversight')
+) as v(key,name,description)
+on conflict(organization_id,key) do nothing;
+
+insert into public.default_role_permission_templates(role,permission)
+select role_key,permission_code from (values
+ ('procurement_officer','dashboard.view'),('procurement_officer','purchasing.view'),
+ ('procurement_officer','purchasing.create'),('procurement_officer','purchasing.receive'),
+ ('procurement_officer','suppliers.view'),('procurement_officer','suppliers.manage'),
+ ('procurement_officer','catalog.view'),('procurement_officer','inventory.view'),
+ ('hr_officer','dashboard.view'),('hr_officer','hr.view'),('hr_officer','hr.manage'),
+ ('hr_officer','attendance.use'),('hr_officer','attendance.manage'),
+ ('hr_officer','leave.request'),('hr_officer','leave.manage'),
+ ('hr_officer','payroll.view'),('hr_officer','payroll.manage'),
+ ('delivery_driver','dashboard.view'),('delivery_driver','fleet.assigned'),
+ ('delivery_driver','fleet.view'),('delivery_driver','attendance.use'),
+ ('project_worker','dashboard.view'),('project_worker','projects.time'),
+ ('branch_manager','dashboard.view'),('branch_manager','sales.view'),
+ ('branch_manager','sales.create'),('branch_manager','catalog.view'),
+ ('branch_manager','inventory.view'),('branch_manager','purchasing.view'),
+ ('branch_manager','purchasing.receive'),('branch_manager','customers.view'),
+ ('branch_manager','customers.manage'),('branch_manager','reports.view'),
+ ('branch_manager','finance.view'),('branch_manager','approvals.view')
+) as v(role_key,permission_code)
+on conflict do nothing;
+
+insert into public.role_permissions(organization_id,role,permission,allowed)
+select r.organization_id,r.key,t.permission,true
+from public.roles r join public.default_role_permission_templates t on t.role=r.key
+where r.is_system and r.key in ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
+on conflict(organization_id,role,permission) do nothing;
+
+-- Seed extended job types automatically when a future company is created.
+create or replace function public.mgt_seed_new_business_job_roles()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ insert into public.roles(organization_id,key,name,description,is_system,active)
+ select new.id,v.key,v.name,v.description,true,true from (values
+ ('procurement_officer','Procurement Officer','Purchasing and suppliers'),
+ ('hr_officer','HR Officer','People and leave management'),
+ ('technician','Technician','Assigned service work'),
+ ('delivery_driver','Delivery Driver','Dispatch and delivery progress'),
+ ('project_worker','Project Worker','Assigned project tasks'),
+ ('branch_manager','Branch Manager','Branch operations')
+ ) as v(key,name,description)
+ on conflict(organization_id,key) do nothing;
+ insert into public.role_permissions(organization_id,role,permission,allowed)
+ select new.id,r.key,t.permission,true from public.roles r
+ join public.default_role_permission_templates t on t.role=r.key
+ where r.organization_id=new.id and r.key in
+ ('procurement_officer','hr_officer','technician','delivery_driver','project_worker','branch_manager')
+ on conflict(organization_id,role,permission) do nothing;
+ return new;
+end; $$;
+drop trigger if exists mgt_seed_new_business_job_roles on public.organizations;
+create trigger mgt_seed_new_business_job_roles
+after insert on public.organizations for each row
+execute function public.mgt_seed_new_business_job_roles();
+revoke all on function public.mgt_seed_new_business_job_roles() from public,anon,authenticated;
+
+-- Assigned project progress is an explicit work permission, not just membership.
+CREATE OR REPLACE FUNCTION public.update_project_task(p_task_id uuid, p_status text, p_progress_percent numeric DEFAULT NULL::numeric, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_task public.project_tasks%rowtype;
+ v_progress numeric(5,2);
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='projects' and enabled)
+ then raise exception 'Projects module is not enabled'; end if;
+ if p_status not in ('todo','in_progress','blocked','completed','cancelled') then raise exception 'Invalid task status'; end if;
+
+ select * into v_task from public.project_tasks where id=p_task_id and organization_id=v_org for update;
+ if not found then raise exception 'Task not found'; end if;
+
+ if not (
+  public.has_permission('projects.manage')
+  or (public.has_permission('projects.time') and v_task.assigned_user_id=auth.uid())
+ ) then raise exception 'You can only update tasks assigned to you'; end if;
+
+ v_progress:=coalesce(p_progress_percent,v_task.progress_percent);
+ if v_progress<0 or v_progress>100 then raise exception 'Progress must be between 0 and 100'; end if;
+ if p_status='completed' then v_progress:=100; end if;
+
+ update public.project_tasks set
+  status=p_status,progress_percent=v_progress,notes=coalesce(p_notes,notes),
+  completed_at=case when p_status='completed' then coalesce(completed_at,now()) else null end,
+  updated_at=now()
+ where id=v_task.id;
+
+ update public.projects p set
+  progress_percent=coalesce((
+    select round(avg(t.progress_percent),2)
+    from public.project_tasks t
+    where t.project_id=p.id and t.status<>'cancelled'
+  ),p.progress_percent),
+  updated_at=now()
+ where p.id=v_task.project_id;
+
+ insert into public.project_events(organization_id,project_id,event_type,description,metadata,user_id)
+ values(v_org,v_task.project_id,'task_status',v_task.title,
+  jsonb_build_object('task_id',v_task.id,'from_status',v_task.status,'to_status',p_status,'progress_percent',v_progress),auth.uid());
+
+ return jsonb_build_object('task_id',v_task.id,'status',p_status,'progress_percent',v_progress);
+end; $function$;
+
+-- Drivers may only submit progress for their own dispatched trips.
+-- This deliberately does not grant fleet.dispatch (which can create trips).
+create or replace function public.mgt_update_assigned_delivery(
+ p_delivery_id uuid,p_status text,p_recipient_name text default null,p_notes text default null,
+ p_failure_reason text default null
+) returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_org uuid:=public.current_organization_id();v_me uuid:=auth.uid();v_d public.deliveries%rowtype;
+begin
+ if v_org is null or not public.has_permission('fleet.assigned')
+ then raise exception 'Permission denied: assigned delivery'; end if;
+ if not exists(select 1 from public.organization_modules where organization_id=v_org and module_key='fleet' and enabled)
+ then raise exception 'Fleet module is not enabled'; end if;
+ if p_status not in ('in_transit','delivered','failed') then raise exception 'Invalid driver delivery status'; end if;
+ select * into v_d from public.deliveries d
+ where d.id=p_delivery_id and d.organization_id=v_org and d.driver_user_id=v_me
+ and public.mgt_record_scope_allows(v_org,d.source_location_id,d.driver_user_id,true)
+ for update;
+ if not found then raise exception 'This delivery is not assigned to you'; end if;
+ if v_d.status not in ('dispatched','in_transit') then
+   raise exception 'Only dispatched, open deliveries can be updated by a driver'; end if;
+ if p_status='delivered' and nullif(trim(coalesce(p_recipient_name,'')),'') is null
+ then raise exception 'Recipient name is required as proof of delivery'; end if;
+ if p_status='failed' and nullif(trim(coalesce(p_failure_reason,'')),'') is null
+ then raise exception 'Reason for unsuccessful delivery is required'; end if;
+ update public.deliveries set status=p_status,
+    dispatched_at=coalesce(dispatched_at,now()),
+    delivered_at=case when p_status='delivered' then now() else delivered_at end,
+    recipient_name=case when p_status='delivered' then trim(p_recipient_name) else recipient_name end,
+    failure_reason=case when p_status='failed' then trim(p_failure_reason) else failure_reason end,
+    delivery_notes=case when nullif(trim(coalesce(p_notes,'')),'') is null then delivery_notes else trim(p_notes) end,
+    updated_at=now()
+ where id=v_d.id and organization_id=v_org;
+ if v_d.vehicle_id is not null then
+   update public.vehicles set status=case when p_status='in_transit' then 'in_transit' else 'available' end,
+     updated_at=now() where id=v_d.vehicle_id and organization_id=v_org and status<>'maintenance';
+ end if;
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(v_org,v_d.source_location_id,v_me,'assigned_delivery_updated','delivery',v_d.id::text,
+ v_d.delivery_number,jsonb_build_object('from_status',v_d.status,'to_status',p_status));
+ return jsonb_build_object('delivery_id',v_d.id,'status',p_status);
+end; $$;
+revoke all on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) from public,anon;
+grant execute on function public.mgt_update_assigned_delivery(uuid,text,text,text,text) to authenticated,service_role;
+
+-- An owner deleting a custom role cannot leave stale secondary assignments.
+create or replace function public.mgt_cleanup_extra_roles_after_role_delete()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ delete from public.user_additional_roles
+ where organization_id=old.organization_id and role=old.key;
+ return old;
+end; $$;
+drop trigger if exists mgt_cleanup_extra_roles_on_role_delete on public.roles;
+create trigger mgt_cleanup_extra_roles_on_role_delete
+after delete on public.roles for each row
+execute function public.mgt_cleanup_extra_roles_after_role_delete();
+revoke all on function public.mgt_cleanup_extra_roles_after_role_delete() from public,anon,authenticated;

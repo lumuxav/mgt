@@ -50,7 +50,7 @@ export async function GET(req) {
 
   const { adminClient, organizationId, caller } = check
 
-  const [profilesRes, authRes, rolesRes, locationsRes, invitationsRes] = await Promise.all([
+  const [profilesRes, authRes, rolesRes, locationsRes, invitationsRes, extraRolesRes, workScopeRes] = await Promise.all([
     adminClient
       .from('users')
       .select('id, full_name, email, role, active, default_location_id, created_at, archived_at')
@@ -77,9 +77,11 @@ export async function GET(req) {
       .eq('organization_id', organizationId)
       .eq('status', 'pending')
       .order('invited_at', { ascending: false }),
+    adminClient.from('user_additional_roles').select('user_id,role').eq('organization_id',organizationId),
+    adminClient.from('user_work_scope').select('user_id,scope,location_id').eq('organization_id',organizationId),
   ])
 
-  for (const result of [profilesRes, authRes, rolesRes, locationsRes, invitationsRes]) {
+  for (const result of [profilesRes, authRes, rolesRes, locationsRes, invitationsRes, extraRolesRes, workScopeRes]) {
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 })
   }
 
@@ -88,6 +90,8 @@ export async function GET(req) {
     const auth = authMap[profile.id]
     return {
       ...profile,
+      additional_roles: (extraRolesRes.data||[]).filter(row=>row.user_id===profile.id).map(row=>row.role),
+      work_scope: (workScopeRes.data||[]).find(row=>row.user_id===profile.id)||{scope:'organization',location_id:null},
       email: profile.email || auth?.email || null,
       auth_created_at: auth?.created_at || profile.created_at || null,
       last_sign_in_at: auth?.last_sign_in_at || null,

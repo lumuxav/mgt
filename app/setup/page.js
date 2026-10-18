@@ -15,6 +15,7 @@ import {
 } from '../../lib/platformConfig'
 import { invalidatePlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
 import { isSavedLocation, matchSetupLocation } from '../../lib/setupLocations'
+import { INDUSTRY_PRESETS, MODULE_CATEGORIES } from '../../lib/workspaceCatalog'
 
 const slug = () => Math.random().toString(36).slice(2, 8)
 
@@ -84,6 +85,13 @@ export default function BusinessSetupPage() {
   const update = (changes) => {
     setSaved(false)
     setConfig((current) => ({ ...current, ...changes }))
+  }
+
+  const chooseIndustry = (id) => {
+    const preset = INDUSTRY_PRESETS.find(item => item.id === id)
+    if (!preset) return
+    setSaved(false)
+    setConfig(current => normalizeBusinessConfig({ ...current, businessType: preset.type, industryPreset: preset.id, enabledModules: [...new Set([...MODULE_CATALOG.filter(m=>m.core).map(m=>m.id), ...preset.modules])] }))
   }
 
   const chooseTemplate = (type) => {
@@ -307,6 +315,13 @@ export default function BusinessSetupPage() {
             ))}
           </div>
 
+          <div className="mt-5"><label className="text-sm font-bold" htmlFor="mgt-industry">Industry-specific starting configuration</label>
+            <select id="mgt-industry" className="input-base mt-2" value={config.industryPreset||''} onChange={event=>chooseIndustry(event.target.value)}>
+              <option value="">Choose an industry (optional)</option>
+              {INDUSTRY_PRESETS.map(preset=><option key={preset.id} value={preset.id}>{preset.label}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-muted">Templates activate existing MGT modules; they do not invent specialist hotel, kitchen or farm management features.</p>
+          </div>
           <div className="setup-form-grid">
             <label><span>Business name</span><input className="input-base" value={config.businessName} onChange={(e) => update({ businessName: e.target.value })} placeholder="e.g. Acme Traders Ltd" /></label>
             <label><span>Short name / mark</span><input className="input-base" maxLength={4} value={config.shortName} onChange={(e) => update({ shortName: e.target.value.toUpperCase() })} placeholder="e.g. AT" /></label>
@@ -356,17 +371,21 @@ export default function BusinessSetupPage() {
             </div>
           </div>
 
-          <div className="setup-module-grid">
-            {MODULE_CATALOG.map((module) => {
-              const enabled = modules.has(module.id)
-              return (
-                <button key={module.id} type="button" onClick={() => toggleModule(module.id)} className={`setup-module ${enabled ? 'enabled' : ''}`}>
-                  <span className="setup-module-check">{enabled ? '✓' : '+'}</span>
-                  <div><strong>{module.label}</strong><p>{module.description}</p>{module.core && <small>Core module</small>}</div>
-                </button>
-              )
-            })}
-          </div>
+          {MODULE_CATEGORIES.map(category => (
+            <div key={category.id} className="mt-5">
+              <h3 className="mb-3 text-sm font-black">{category.name}</h3>
+              <div className="setup-module-grid">
+                {MODULE_CATALOG.filter(module => category.modules.includes(module.id)).map(module => {
+                  const enabled = modules.has(module.id)
+                  return <button key={module.id} type="button" onClick={()=>toggleModule(module.id)}
+                    className={`setup-module ${enabled ? 'enabled' : ''}`}>
+                    <span className="setup-module-check">{enabled ? '✓' : '+'}</span>
+                    <div><strong>{module.label}</strong><p>{module.description}</p>{module.core&&<small>Core module</small>}</div>
+                  </button>
+                })}
+              </div>
+            </div>
+          ))}
         </section>
       )}
 
