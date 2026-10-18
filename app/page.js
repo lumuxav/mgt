@@ -27,6 +27,7 @@ export default function HomePage() {
   })
   const [backendReady, setBackendReady] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [canOpenIntelligence, setCanOpenIntelligence] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -47,7 +48,7 @@ export default function HomePage() {
         const start = `${today}T00:00:00.000Z`
         const end = `${today}T23:59:59.999Z`
 
-        const [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes] = await Promise.all([
+        const [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes, permissionRes] = await Promise.all([
           supabase.from('sales').select('id,total_amount,amount_paid,refunded_amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end),
           supabase.from('sales').select('total_amount,amount_paid,refunded_amount').eq('organization_id', orgId).in('payment_status', ['partial', 'credit']),
           supabase.from('products').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('active', true),
@@ -55,11 +56,13 @@ export default function HomePage() {
           supabase.from('expenses').select('amount,created_at').eq('organization_id', orgId).gte('created_at', start).lte('created_at', end),
           supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['draft', 'ordered', 'partial']),
           supabase.from('work_orders').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).in('status', ['open', 'in_progress']),
+          supabase.rpc('current_permissions'),
         ])
 
         const fatal = [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes].find((r) => r.error)
         if (fatal?.error) throw fatal.error
 
+        setCanOpenIntelligence(!permissionRes.error && (permissionRes.data || []).some((row) => row.permission === 'insights.view'))
         const sales = salesRes.data || []
         setMetrics({
           salesToday: sales.length,
@@ -94,6 +97,7 @@ export default function HomePage() {
   const initials = useMemo(() => (profile?.full_name || 'User').split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase(), [profile])
 
   const quickActions = [
+    moduleEnabled(business, 'insights') && canOpenIntelligence && ['/insights', 'MGT Intelligence', 'Forecasts and quick business answers', '✦'],
     moduleEnabled(business, 'pos') && ['/pos', 'New POS sale', 'Fast counter checkout', '+'],
     moduleEnabled(business, 'sales') && ['/sales', 'Sales & credit', 'Receipts, debt and returns', '▤'],
     moduleEnabled(business, 'inventory') && ['/catalog', 'Add product', 'Manage products and services', '□'],
