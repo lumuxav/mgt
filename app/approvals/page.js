@@ -19,6 +19,7 @@ export default function ApprovalsPage(){
   const [context,setContext]=useState(null)
   const [permissions,setPermissions]=useState([])
   const [rules,setRules]=useState([])
+  const [separateApprovers,setSeparateApprovers]=useState(false)
   const [requests,setRequests]=useState([])
   const [tab,setTab]=useState('pending')
   const [message,setMessage]=useState(null)
@@ -29,6 +30,7 @@ export default function ApprovalsPage(){
 
   const currency=context?.organization?.currency||business.currency||'UGX'
   const canManage=permissions.includes('approvals.manage')
+  const canConfigure=permissions.includes('settings.manage')
 
   const load=async()=>{
     setLoading(true)
@@ -37,15 +39,17 @@ export default function ApprovalsPage(){
       setContext(ctx)
       if(!ctx.organization?.id)throw new Error('Complete business setup first.')
       const org=ctx.organization.id
-      const [permRes,ruleRes,requestRes]=await Promise.all([
+      const [permRes,ruleRes,requestRes,organizationRes]=await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('approval_rules').select('id,rule_type,enabled,threshold,updated_at').eq('organization_id',org).order('rule_type'),
-        supabase.from('approval_requests').select('id,location_id,request_type,entity_type,entity_id,title,amount,status,review_notes,metadata,created_at,reviewed_at,locations(name),requester:users!approval_requests_requested_by_fkey(full_name),reviewer:users!approval_requests_reviewed_by_fkey(full_name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
+        supabase.from('approval_requests').select('id,location_id,request_type,entity_type,entity_id,title,amount,status,requested_by,review_notes,metadata,created_at,reviewed_at,locations(name),requester:users!approval_requests_requested_by_fkey(full_name),reviewer:users!approval_requests_reviewed_by_fkey(full_name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
+        supabase.from('organizations').select('require_separate_approvers').eq('id',org).single(),
       ])
-      for(const result of [permRes,ruleRes,requestRes])if(result.error)throw result.error
+      for(const result of [permRes,ruleRes,requestRes,organizationRes])if(result.error)throw result.error
       setPermissions((permRes.data||[]).map((row)=>row.permission))
       setRules(ruleRes.data||[])
       setRequests(requestRes.data||[])
+      setSeparateApprovers(organizationRes.data?.require_separate_approvers===true)
     }catch(error){
       setMessage({type:'error',text:error.message||'Could not load approvals.'})
     }finally{setLoading(false)}
@@ -62,6 +66,15 @@ export default function ApprovalsPage(){
     setBusy(false)
   }
 
+  const configureApprovers=async(enabled)=>{
+    if(!canConfigure||!context?.organization?.id)return
+    setBusy(true);setMessage(null)
+    const {error}=await supabase.from('organizations').update({require_separate_approvers:enabled})
+      .eq('id',context.organization.id)
+    if(error)setMessage({type:'error',text:error.message})
+    else{setSeparateApprovers(enabled);setMessage({type:'success',text:'Approval review policy updated.'})}
+    setBusy(false)
+  }
   const review=async(decision)=>{
     if(!reviewing)return
     setBusy(true);setMessage(null)
@@ -132,7 +145,7 @@ export default function ApprovalsPage(){
       {pending.map((request)=><article key={request.id} className="page-card p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-black uppercase text-amber-600">{request.request_type.replaceAll('_',' ')}</span><strong>{request.title}</strong></div><p className="mt-2 text-sm text-muted">{detailFor(request)}</p><p className="mt-1 text-xs text-muted">Requested by {request.requester?.full_name||'staff'} · {request.locations?.name||'Business'} · {new Date(request.created_at).toLocaleString()}</p></div>
-          <div className="flex flex-wrap gap-2"><Link href={requestLink(request)} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">View operation</Link>{canManage&&<button type="button" onClick={()=>{setReviewing(request);setReviewNotes('')}} className="btn-primary rounded-xl px-3 py-2 text-xs font-black">Review</button>}</div>
+          <div className="flex flex-wrap gap-2"><Link href={requestLink(request)} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">View operation</Link>{canManage&&(!separateApprovers||request.requested_by!==context?.user?.id)&&<button type="button" onClick={()=>{setReviewing(request);setReviewNotes('')}} className="btn-primary rounded-xl px-3 py-2 text-xs font-black">Review</button>}</div>
         </div>
       </article>)}
     </section>}
@@ -144,7 +157,20 @@ export default function ApprovalsPage(){
       </div>
     </section>}
 
-    {tab==='rules'&&<section className="grid gap-4 lg:grid-cols-3">
+    {tab==='rules'&&<section>
+      <div className="page-card mb-4 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 className="font-black">Two-person approval policy</h2>
+            <p className="mt-1 text-sm text-muted">When enabled, a person who requested an approval cannot approve their own request. An authorized second approver is required.</p>
+          </div>
+          <button type="button" disabled={!canConfigure||busy} onClick={()=>configureApprovers(!separateApprovers)}
+            className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">
+            {separateApprovers?'Require separate approver: ON':'Require separate approver: OFF'}
+          </button>
+        </div>
+        {separateApprovers&&<p className="mt-2 text-xs text-muted">Keep at least two authorized people available for approvals to avoid blocking business operations.</p>}
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
       {rules.map((rule)=>{
         const meta=ruleMeta[rule.rule_type]||{label:rule.rule_type,description:'',unit:'quantity'}
         return <article key={rule.id} className="page-card p-5">
@@ -154,6 +180,7 @@ export default function ApprovalsPage(){
         </article>
       })}
       {!rules.length&&<div className="page-card p-6 text-sm text-muted">No approval rules configured.</div>}
+      </div>
     </section>}
 
     {reviewing&&<div className="fixed inset-0 z-[100] overflow-y-auto bg-black/60 p-4 sm:p-8"><div className="mx-auto max-w-xl rounded-3xl bg-[var(--panel)] p-5 shadow-2xl sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="page-eyebrow">Approval review</p><h2 className="text-xl font-black">{reviewing.title}</h2><p className="mt-2 text-sm text-muted">{detailFor(reviewing)}</p></div><button type="button" onClick={()=>setReviewing(null)} className="rounded-xl border border-[var(--line)] px-3 py-2 font-black">×</button></div><div className="mt-4 rounded-2xl bg-[var(--panel-2)] p-4 text-sm"><p>Requested by <strong>{reviewing.requester?.full_name||'staff'}</strong></p><p className="mt-1 text-muted">{reviewing.locations?.name||'Business'} · {new Date(reviewing.created_at).toLocaleString()}</p>{reviewing.metadata?.notes&&<p className="mt-2 text-muted">{reviewing.metadata.notes}</p>}</div><textarea className="input-base mt-4 min-h-24" placeholder="Review notes (optional)" value={reviewNotes} onChange={(event)=>setReviewNotes(event.target.value)}/><div className="mt-4 grid gap-3 sm:grid-cols-2"><button disabled={busy} type="button" onClick={()=>review('rejected')} className="rounded-xl bg-red-500 px-4 py-3 font-black text-white disabled:opacity-50">{busy?'Working...':'Reject'}</button><button disabled={busy} type="button" onClick={()=>review('approved')} className="rounded-xl bg-emerald-600 px-4 py-3 font-black text-white disabled:opacity-50">{busy?'Working...':'Approve'}</button></div></div></div>}
