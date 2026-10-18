@@ -225,3 +225,41 @@ create policy work_orders_select on public.work_orders for select to authenticat
  and public.mgt_record_scope_allows(organization_id,location_id,assigned_to,
     exists(select 1 from public.work_order_assignments wa where wa.work_order_id=work_orders.id and wa.user_id=auth.uid()))
 );
+
+-- New staff receive a conservative, job-shaped scope from day one.
+-- Existing members with no record retain their previous organization scope.
+create or replace function public.mgt_initialize_staff_scope()
+returns trigger language plpgsql security definer set search_path=public as $$
+declare v_scope text:='organization';v_location uuid:=null;
+begin
+ if new.organization_id is null then return new; end if;
+ if new.role in ('employee','technician','project_worker') then
+    v_scope:='assigned';
+ elsif new.role in ('cashier','salesperson','storekeeper','branch_manager')
+    and new.default_location_id is not null then
+    v_scope:='location';
+    v_location:=new.default_location_id;
+ end if;
+ insert into public.user_work_scope(organization_id,user_id,scope,location_id)
+ values(new.organization_id,new.id,v_scope,v_location)
+ on conflict(organization_id,user_id) do nothing;
+ return new;
+end; $$;
+drop trigger if exists mgt_initialize_staff_scope_on_create on public.users;
+create trigger mgt_initialize_staff_scope_on_create
+after insert on public.users for each row execute function public.mgt_initialize_staff_scope();
+revoke all on function public.mgt_initialize_staff_scope() from public,anon,authenticated;
+
+-- Initial default role templates for new businesses. Role grants remain
+-- customizable and existing company-specific grants are never overwritten.
+insert into public.default_role_permission_templates(role,permission) values
+('employee','workspace.tasks'),
+('employee','services.assigned'),
+('production_staff','workspace.tasks'),
+('technician','workspace.tasks'),
+('technician','services.assigned'),
+('technician','attendance.use'),
+('project_worker','workspace.tasks'),
+('project_worker','projects.time'),
+('project_worker','attendance.use')
+on conflict do nothing;
