@@ -20,6 +20,10 @@ INSERT INTO auth.users(id,email) VALUES
 INSERT INTO public.organizations(id,name) VALUES
  ('00000000-0000-0000-0000-000000000101','CI Business A'),
  ('00000000-0000-0000-0000-000000000102','CI Business B');
+-- Existing MGT business bootstrap installs the original role templates
+-- after company creation; direct test-only org inserts must do the same.
+SELECT public.seed_default_roles('00000000-0000-0000-0000-000000000101');
+SELECT public.seed_default_roles('00000000-0000-0000-0000-000000000102');
 INSERT INTO public.locations(id,organization_id,name) VALUES
  ('00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000101','Business A Warehouse'),
  ('00000000-0000-0000-0000-000000000302','00000000-0000-0000-0000-000000000101','Business A Other Branch'),
