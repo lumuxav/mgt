@@ -57,3 +57,8 @@ npm run dist -- --win --x64
 ```
 
 Use the matching operating system for each build. Root `npm ci` and the Android workflow generate the Capacitor project, icon and splash assets. Ordinary web updates do not need rebuilding every package. Desktop dependencies have a separate lockfile and do not increase the Vercel runtime dependency set.
+
+
+## Next MGT icon and signup release
+
+The exact approved MGT icon must be used for browser favicons, PWA tiles, Android launcher/splash and all desktop installers. Native icon changes require new packages. Email confirmations require the canonical MGT redirect URLs and appropriate Supabase Auth dashboard settings; see [docs/MGT_OWNER_AUTH_AND_BRAND.md](docs/MGT_OWNER_AUTH_AND_BRAND.md). Test-signed APKs and unsigned desktop packages retain their existing distribution limitations.
