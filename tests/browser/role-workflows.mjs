@@ -80,7 +80,7 @@ try{
   ['delivery_driver',async(page)=>{
    await ready(page,'/my-work','My Work')
    await page.getByText('CI-E2E-DLV-001').waitFor({state:'visible',timeout:deadline})
-   await page.getByRole('textbox',{name:'Recipient name (for successful delivery)'}).fill('CI Receipt Tester')
+   await page.getByPlaceholder('Recipient name (for successful delivery)').fill('CI Receipt Tester')
    await page.getByRole('button',{name:'Confirm delivered'}).click()
    await page.getByText('Work updated successfully.').waitFor({state:'visible',timeout:deadline})
    check(true,'driver submitted proof of delivery through the real browser')

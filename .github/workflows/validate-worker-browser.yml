@@ -46,7 +46,7 @@ jobs:
               path.rename(path.with_name(f'20261018{i:06d}_browser_{i:03d}.sql'))
           print(f'Normalized {len(paths)} migration versions ONLY on disposable CI checkout')
           PY
-          supabase start
+          supabase start --exclude studio,realtime,storage-api,imgproxy,edge-runtime,logflare,vector,supavisor,postgres-meta
           supabase status -o env > /tmp/mgt-ci-supabase.env
           python3 - <<'PY'
           from pathlib import Path
