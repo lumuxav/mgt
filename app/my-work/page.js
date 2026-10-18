@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
-import { getPlatformContext } from '../../lib/platformDb'
-import { getBusinessConfig, moduleEnabled } from '../../lib/platformConfig'
+import { getPlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { moduleEnabled } from '../../lib/platformConfig'
 
 const pretty = value => String(value||'').replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase())
 export default function MyWorkPage(){
   const [context,setContext]=useState(null)
+  const [business,setBusiness]=useState(null)
   const [grants,setGrants]=useState([])
   const [data,setData]=useState({tasks:[],jobs:[],attendance:{}})
   const [loading,setLoading]=useState(true)
@@ -21,12 +22,15 @@ export default function MyWorkPage(){
       const ctx=await getPlatformContext({force:true})
       setFailure('')
       if(!ctx?.organization?.id)throw new Error('You need an active business workspace.')
+      const authoritative=await loadBusinessConfigFromDatabase()
+      if(!authoritative?.organizationId || authoritative.organizationId!==ctx.organization.id) throw new Error('Business module configuration unavailable.')
       const [work,permissions]=await Promise.all([
         supabase.rpc('mgt_my_work'),supabase.rpc('current_permissions')
       ])
       if(work.error)throw work.error
       if(permissions.error)throw permissions.error
       setContext(ctx)
+      setBusiness(authoritative)
       setGrants((permissions.data||[]).map(row=>row.permission))
       setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],attendance:work.data?.attendance||{}})
     }catch(error){setFailure(error?.message||'Could not load your work.')}finally{setLoading(false)}
@@ -44,7 +48,6 @@ export default function MyWorkPage(){
       await load()
     }catch(error){setFailure(error?.message||'Could not save your update.')}finally{setBusy('')}
   }
-  const business=getBusinessConfig()
   const can=permission=>grants.includes(permission)
   const enable=key=>moduleEnabled(business,key)
   const attendanceEnabled=enable('hr')&&can('attendance.use')
