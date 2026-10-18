@@ -15,7 +15,7 @@ const workspaces={
  production_staff:'/production',technician:'/my-work',project_worker:'/my-work',
  delivery_driver:'/my-work',employee:'/my-work'
 }
-const deadline=60000
+const deadline=25000
 let checks=0
 const failures=[]
 const contexts={}
@@ -65,6 +65,7 @@ try{
     await page.screenshot({path:'/tmp/mgt-browser-failure-'+role+'.png',fullPage:true}).catch(()=>{})
     console.log('FAIL browser '+role+': '+e.message.slice(0,1100))
   }finally{await page.close()}
+  if(failures.length>=3){console.log('Stopping early after three browser failures to surface diagnostics before timeout');break}
  }
  // The two operative workflows must change live data through real browser clicks.
  for(const [role,flow] of [
