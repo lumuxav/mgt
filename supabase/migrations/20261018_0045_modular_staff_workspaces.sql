@@ -263,3 +263,93 @@ insert into public.default_role_permission_templates(role,permission) values
 ('project_worker','projects.time'),
 ('project_worker','attendance.use')
 on conflict do nothing;
+
+-- Existing organizations keep present approval workflow until the owner opts in.
+alter table public.organizations
+add column if not exists require_separate_approvers boolean not null default false;
+
+-- The original review transaction logic is retained; just require another
+-- authorized approver when the business explicitly enables two-person review.
+CREATE OR REPLACE FUNCTION public.review_approval_request(p_request_id uuid, p_decision text, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_req public.approval_requests%rowtype;
+ v_product public.products%rowtype;
+ v_product_id uuid;
+ v_delta numeric(18,3);
+ v_reason text;
+ v_current numeric(18,3);
+ v_new numeric(18,3);
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not public.has_permission('approvals.manage') then raise exception 'Permission denied: approvals.manage'; end if;
+ if p_decision not in ('approved','rejected') then raise exception 'Decision must be approved or rejected'; end if;
+
+ select * into v_req from public.approval_requests
+ where id=p_request_id and organization_id=v_org and status='pending' for update;
+ if not found then raise exception 'Pending approval request not found'; end if;
+ if (select coalesce(require_separate_approvers,false) from public.organizations where id=v_org)
+    and v_req.requested_by=auth.uid() then
+   raise exception 'A different authorized staff member must approve this request';
+ end if;
+
+ if v_req.request_type='purchase_order' then
+  update public.purchases
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'ordered' else 'rejected' end,
+       updated_at=now()
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='production_order' then
+  update public.production_orders
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'planned' else 'rejected' end
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='stock_adjustment' and p_decision='approved' then
+  v_product_id:=(v_req.metadata->>'product_id')::uuid;
+  v_delta:=(v_req.metadata->>'quantity_delta')::numeric;
+  v_reason:=coalesce(v_req.metadata->>'reason','adjustment');
+
+  select * into v_product from public.products
+   where id=v_product_id and organization_id=v_org and active=true and track_inventory=true;
+  if not found then raise exception 'Adjustment product no longer available'; end if;
+
+  insert into public.stock_balances(product_id,location_id,quantity,reserved_quantity)
+   values(v_product_id,v_req.location_id,0,0) on conflict(product_id,location_id) do nothing;
+
+  select quantity into v_current from public.stock_balances
+   where product_id=v_product_id and location_id=v_req.location_id for update;
+
+  v_new:=coalesce(v_current,0)+v_delta;
+  if v_new<0 then raise exception 'Approved adjustment would create negative stock'; end if;
+
+  update public.stock_balances set quantity=v_new,updated_at=now()
+   where product_id=v_product_id and location_id=v_req.location_id;
+
+  insert into public.stock_movements(
+   organization_id,location_id,product_id,movement_type,quantity,unit_cost,reference_type,reference_id,notes,recorded_by
+  )
+  values(
+   v_org,v_req.location_id,v_product_id,v_reason,v_delta,v_product.cost_price,
+   'approved_adjustment',v_req.id,coalesce(v_req.metadata->>'notes',p_notes),auth.uid()
+  );
+ end if;
+
+ update public.approval_requests
+ set status=p_decision,reviewed_by=auth.uid(),review_notes=p_notes,reviewed_at=now()
+ where id=v_req.id;
+
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(
+  v_org,v_req.location_id,auth.uid(),'approval_'||p_decision,'approval_request',v_req.id::text,v_req.title,
+  jsonb_build_object('request_type',v_req.request_type,'entity_id',v_req.entity_id,'review_notes',p_notes)
+ );
+
+ return jsonb_build_object('approval_request_id',v_req.id,'status',p_decision,'request_type',v_req.request_type);
+end; $function$;
