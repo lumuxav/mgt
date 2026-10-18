@@ -17,7 +17,7 @@ export default function ForgotPasswordPage() {
     setError('')
 
     try {
-      const redirectTo = `${window.location.origin}/reset-password`
+      const redirectTo = 'https://mgt-lake.vercel.app/reset-password'
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
       if (resetError) throw resetError
       setMessage('If an account exists for that email, a password reset link has been sent. Check your inbox and spam folder.')
