@@ -3,6 +3,7 @@ import { canManageOwner, consumeServerRateLimit, verifyOrganizationPermission } 
 
 const cleanEmail = (value) => String(value || '').trim().toLowerCase()
 const cleanText = (value) => String(value || '').trim()
+const PLATFORM_ROLES = new Set(['super_admin', 'system_admin'])
 
 async function loadRole(adminClient, organizationId, role) {
   const { data, error } = await adminClient
@@ -138,6 +139,7 @@ export async function POST(req) {
   try {
     const roleDef = await loadRole(adminClient, organizationId, role)
     if (!roleDef) return NextResponse.json({ error: 'Choose a valid active role.' }, { status: 400 })
+    if (PLATFORM_ROLES.has(role)) return NextResponse.json({ error: 'Platform administrator accounts cannot be assigned by a business.' }, { status: 403 })
 
     if (role === 'owner' && !canManageOwner(caller.role)) {
       return NextResponse.json({ error: 'Only an Owner can invite another Owner.' }, { status: 403 })
@@ -178,6 +180,13 @@ export async function POST(req) {
     if (!inviteData?.user?.id) return NextResponse.json({ error: 'Supabase did not return an invited user account.' }, { status: 500 })
 
     const userId = inviteData.user.id
+    // Never move an existing authenticated account out of another business.
+    const { data: boundAccount, error: boundAccountError } = await adminClient
+      .from('users').select('id, organization_id').eq('id', userId).maybeSingle()
+    if (boundAccountError) throw boundAccountError
+    if (boundAccount?.organization_id) {
+      return NextResponse.json({ error: 'This email already belongs to a business workspace. An invitation cannot move an existing account.' }, { status: 409 })
+    }
 
     const { error: profileError } = await adminClient
       .from('users')
@@ -280,6 +289,7 @@ export async function PATCH(req) {
     const role = cleanText(body.role)
     const roleDef = await loadRole(adminClient, organizationId, role)
     if (!roleDef) return NextResponse.json({ error: 'Choose a valid active role.' }, { status: 400 })
+    if (PLATFORM_ROLES.has(role)) return NextResponse.json({ error: 'Platform administrator accounts cannot be assigned by a business.' }, { status: 403 })
     if (role === 'owner' && !canManageOwner(caller.role)) {
       return NextResponse.json({ error: 'Only an Owner can assign the Owner role.' }, { status: 403 })
     }
@@ -295,7 +305,7 @@ export async function PATCH(req) {
 
   if (body.active !== undefined) changes.active = body.active
 
-  const { error: updateError } = await adminClient.from('users').update(changes).eq('id', userId)
+  const { error: updateError } = await adminClient.from('users').update(changes).eq('organization_id', organizationId).eq('id', userId)
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 })
 
   let authSyncError = false

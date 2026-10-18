@@ -24,6 +24,6 @@ test('the More sheet closes when tapping any module and when pressing Escape', (
 test('Intelligence Home shortcut is available only with its module and permission', () => {
   const home = read('app/page.js')
   assert.match(home, /supabase\.rpc\('current_permissions'\)/)
-  assert.match(home, /row\.permission === 'insights\.view'/)
-  assert.match(home, /moduleEnabled\(business, 'insights'\) && canOpenIntelligence/)
+  assert.match(home, /const grants = new Set\(\(rows \|\| \[\]\)\.map\(row => row.permission\)\)/)
+  assert.match(home, /moduleEnabled\(business, 'insights'\) && can\('insights.view'\)/)
 })
