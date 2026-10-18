@@ -86,7 +86,7 @@ export default function LoginPage() {
 
     const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })
     if (err) {
-      setError('Wrong email or password.')
+      setError(err?.code === 'email_not_confirmed' ? 'Please confirm your email from the message sent by MGT before signing in.' : err?.status === 429 ? 'Too many sign-in attempts. Please wait before trying again.' : 'Wrong email or password.')
       setLoading(false)
       return
     }
