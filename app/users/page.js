@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { adminApi } from '../../lib/adminApi'
-import { getBusinessConfig } from '../../lib/platformConfig'
-import { ROLE_TEMPLATES, visibleModulesForRole, jobWorkflowReadiness } from '../../lib/workspaceCatalog'
+import { MODULE_CATALOG } from '../../lib/platformConfig'
+import { loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { supabase } from '../../lib/supabase'
+import { ROLE_TEMPLATES, visibleModulesForRole, jobWorkflowReadiness, missingWorkModules } from '../../lib/workspaceCatalog'
 
 const prettyDate = (value) => value ? new Date(value).toLocaleString() : 'Never'
 const prettyRole = (key, roles) => roles.find((role) => role.key === key)?.name || String(key || 'Employee').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -27,6 +29,9 @@ export default function UsersPage() {
   const [invite, setInvite] = useState({ full_name: '', email: '', role: 'employee', default_location_id: '' })
   const [newRole, setNewRole] = useState({ name: '', description: '', template: '' })
   const [staffAccessDrafts, setStaffAccessDrafts] = useState({})
+  const [authoritativeBusiness, setAuthoritativeBusiness] = useState(null)
+  const [canManageModules, setCanManageModules] = useState(false)
+  const [moduleBusy, setModuleBusy] = useState(false)
 
   const callUsers = (method = 'GET', body) => adminApi('/api/admin/users', {
     method,
@@ -57,6 +62,13 @@ export default function UsersPage() {
     setRoles(usersResult.roles || [])
     setLocations(usersResult.locations || [])
     setInvitations(usersResult.invitations || [])
+    const [configResult, callerGrants] = await Promise.allSettled([
+      loadBusinessConfigFromDatabase(), supabase.rpc('current_permissions'),
+    ])
+    const resolvedConfig = configResult.status === 'fulfilled' ? configResult.value : null
+    setAuthoritativeBusiness(resolvedConfig?.organizationId === usersResult.caller.organization_id ? resolvedConfig : null)
+    setCanManageModules(callerGrants.status === 'fulfilled' && !callerGrants.value.error &&
+      (callerGrants.value.data || []).some(row => row.permission === 'settings.manage'))
 
     const rolesResult = await callRoles('GET')
     if (rolesResult.ok) {
@@ -206,11 +218,45 @@ export default function UsersPage() {
   const pendingCount = invitations.length
   const selectedRole = roleBundle.find((role) => role.key === selectedRoleKey)
   const callerCanAssignOwner = ['owner', 'super_admin', 'system_admin'].includes(caller?.role)
-  const enabledModules=getBusinessConfig().enabledModules||[]
+  const enabledModules=authoritativeBusiness?.enabledModules||[]
   const permissionCodes = new Set(permissions.map(item=>item.code))
   const templateSuggestions = ROLE_TEMPLATES.map(t=>({...t,permissions:t.permissions.filter(code=>permissionCodes.has(code))}))
   const rolePreview = (key) => roleBundle.find(role=>role.key===key)?.permissions || []
-  const invitationReadiness = jobWorkflowReadiness([invite.role],rolePreview(invite.role),enabledModules)
+  const invitationReadiness = authoritativeBusiness ? jobWorkflowReadiness([invite.role],rolePreview(invite.role),enabledModules) : []
+  const missingFor = (roles, grants=[]) => authoritativeBusiness ? missingWorkModules(roles, enabledModules, grants) : []
+  const invitationMissingModules = missingFor([invite.role],rolePreview(invite.role))
+  const moduleLabel = module => MODULE_CATALOG.find(item => item.id === module)?.label || module
+
+  const activateModulesForRoles = async (roles, grants=[]) => {
+    if (!canManageModules || !caller?.organization_id || moduleBusy) return
+    setModuleBusy(true)
+    try {
+      // Freshly read this caller's business before writing, not localStorage.
+      // This RPC uses current_organization_id and checks settings.manage in SQL.
+      const current = await loadBusinessConfigFromDatabase()
+      if (!current?.organizationId || current.organizationId !== caller.organization_id) throw new Error('Business context changed. Refresh this page.')
+      const missing = missingWorkModules(roles,current.enabledModules,grants)
+      if (!missing.length) {
+        setAuthoritativeBusiness(current)
+        setMessage({type:'success',text:'Required modules are already enabled in this business.'})
+        return
+      }
+      if (!window.confirm('Enable '+missing.map(moduleLabel).join(', ')+' for '+current.businessName+'? This affects only this business and does not grant any staff permissions.')) return
+      const next = [...new Set([...current.enabledModules,...missing])]
+      const {error} = await supabase.rpc('save_organization_modules',{p_enabled_modules:next})
+      if (error) throw error
+      const verified = await loadBusinessConfigFromDatabase()
+      if (!verified || verified.organizationId !== current.organizationId || missing.some(module=>!verified.enabledModules.includes(module))) {
+        throw new Error('Module change could not be verified. Refresh Business Setup.')
+      }
+      setAuthoritativeBusiness(verified)
+      setMessage({type:'success',text:missing.map(moduleLabel).join(', ')+' enabled for '+verified.businessName+'. Product catalogs, work assignments and permissions still need their normal setup.'})
+    } catch (error) {
+      setMessage({type:'error',text:error?.message || 'Could not enable modules for this business.'})
+    } finally {
+      setModuleBusy(false)
+    }
+  }
 
   if (loading) return <main className="page-wrap text-muted">Loading staff access...</main>
 
@@ -261,6 +307,13 @@ export default function UsersPage() {
               </select>
             </div>
             {canManageRoles&&invitationReadiness.length>0&&<div className="mt-4 rounded-xl border border-[var(--line)] p-3 text-xs"><strong>What this employee will be able to do</strong><p className="mt-1 text-muted">Permissions follow the chosen role. Missing access is never granted automatically.</p><div className="mt-2 space-y-2">{invitationReadiness.map(flow=><p key={flow.label}><strong>{flow.ready?'Ready':'Needs setup'} · {flow.label}</strong>{!flow.ready&&<span className="block text-muted">{flow.missingModule?'Enable '+flow.module+' in Business Setup. ':''}{flow.missingPermissions.length?'Grant '+flow.missingPermissions.join(', ')+' in Roles & Permissions.':''}</span>}</p>)}</div></div>}
+            {!authoritativeBusiness&&<p className="mt-3 text-xs text-amber-600">Business module status could not be verified; refresh before relying on the job preview.</p>}
+            {invitationMissingModules.length>0&&<div className="mt-3 rounded-xl border border-[var(--line)] p-3 text-xs">
+              <strong>Modules needed for this job in this business</strong>
+              <p className="mt-1 text-muted">{invitationMissingModules.map(moduleLabel).join(', ')}. You may invite this person without enabling them; they cannot perform disabled operations.</p>
+              {canManageModules&&<button type="button" disabled={moduleBusy} onClick={()=>activateModulesForRoles([invite.role],rolePreview(invite.role))} className="btn-secondary mt-3 rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50">{moduleBusy?'Updating modules...':'Enable job modules for this business'}</button>}
+              {!canManageModules&&<p className="mt-2 text-muted">Ask an owner or authorized settings manager to enable these modules.</p>}
+            </div>}
             <button disabled={busy} className="btn-primary mt-4 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-50">{busy ? 'Sending...' : 'Send invitation'}</button>
           </form>
 
@@ -295,7 +348,14 @@ export default function UsersPage() {
                         <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${user.active === false ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-600'}`}>{user.active === false ? 'Disabled' : 'Active'}</span>
                       </div>
                       <p className="mt-1 text-sm text-muted">{user.email || 'No email recorded'}</p>
-                      {canManageRoles&&jobWorkflowReadiness([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])],enabledModules).map(flow=><p key={flow.label} className="mt-1 text-xs text-muted">{flow.ready?'Ready':'Setup needed'} · {flow.label}{!flow.ready?' — '+[flow.missingModule?'enable '+flow.module:null,...flow.missingPermissions].filter(Boolean).join(', '):''}</p>)}
+                      <p className="mt-1 text-xs text-muted">Job roles: {[user.role,...(user.additional_roles||[])].map(role=>prettyRole(role,roles)).join(' + ')}</p>
+                      {missingFor([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])]).length>0&&(
+                        <div className="mt-2 rounded-xl border border-amber-500/30 p-3 text-xs">
+                          <strong>Required modules disabled: {missingFor([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])]).map(moduleLabel).join(', ')}</strong>
+                          {canManageModules&&<button type="button" disabled={moduleBusy} onClick={()=>activateModulesForRoles([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])])} className="btn-secondary mt-2 rounded-xl px-3 py-2 text-xs font-bold disabled:opacity-50">Enable this staff member's job modules</button>}
+                        </div>
+                      )}
+                      {canManageRoles&&authoritativeBusiness&&jobWorkflowReadiness([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])],enabledModules).map(flow=><p key={flow.label} className="mt-1 text-xs text-muted">{flow.ready?'Ready':'Setup needed'} · {flow.label}{!flow.ready?' — '+[flow.missingModule?'enable '+flow.module:null,...flow.missingPermissions].filter(Boolean).join(', '):''}</p>)}
                       <div className="mt-3 grid gap-1 text-xs text-muted sm:grid-cols-2"><p>Created: {prettyDate(user.auth_created_at || user.created_at)}</p><p>Last sign in: {prettyDate(user.last_sign_in_at)}</p></div>
                     </div>
 
