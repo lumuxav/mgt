@@ -106,14 +106,23 @@ try{
      card:(await deliveryCard.innerText()).slice(0,480),
      buttons:await deliveryCard.getByRole('button').allTextContents()
    }))
+   const driverEvents=[]
+   page.on('pageerror',e=>driverEvents.push('JS: '+e.message))
+   page.on('console',msg=>{if(msg.type()==='error')driverEvents.push('Console: '+msg.text())})
+   page.on('framenavigated',frame=>{if(frame===page.mainFrame())driverEvents.push('Navigation: '+frame.url())})
    const proofInput=deliveryCard.getByPlaceholder('Recipient name (for successful delivery)')
    await proofInput.fill('CI Receipt Tester')
-   console.log('DRIVER_CI_AFTER '+JSON.stringify({
-     card:(await deliveryCard.innerText()).slice(0,480),
-     proof:await proofInput.inputValue(),
-     buttons:await deliveryCard.getByRole('button').allTextContents()
-   }))
-   await deliveryCard.getByRole('button',{name:'Confirm delivered'}).click({timeout:6000})
+   await page.waitForTimeout(150)
+   const after={
+     url:page.url(),
+     body:(await page.locator('body').innerText({timeout:3000})).slice(0,900),
+     cards:(await page.locator('article').allTextContents()).filter(x=>x.includes('CI-E2E-DLV-001')).slice(0,2),
+     buttons:await page.getByRole('button').allTextContents(),
+     events:driverEvents.slice(0,8)
+   }
+   console.log('DRIVER_CI_AFTER '+JSON.stringify(after))
+   if(!after.buttons.some(x=>x.includes('Confirm delivered')))throw Error('Proof input removed delivery confirmation: '+JSON.stringify(after).slice(0,1300))
+   await page.getByRole('button',{name:'Confirm delivered'}).click({timeout:6000})
    await page.getByText('Work updated successfully.').waitFor({state:'visible',timeout:deadline})
    check(true,'driver submitted proof of delivery through the real browser')
   }]
