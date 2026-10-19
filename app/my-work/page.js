@@ -13,6 +13,7 @@ export default function MyWorkPage(){
   const [business,setBusiness]=useState(null)
   const [grants,setGrants]=useState([])
   const [roleKeys,setRoleKeys]=useState([])
+  const [activeProductCount,setActiveProductCount]=useState(null)
   const [data,setData]=useState({tasks:[],jobs:[],deliveries:[],attendance:{}})
   const [deliveryProof,setDeliveryProof]=useState({})
   const [loading,setLoading]=useState(true)
@@ -34,7 +35,12 @@ export default function MyWorkPage(){
       if(permissions.error)throw permissions.error
       setContext(ctx)
       setBusiness(authoritative)
-      setGrants((permissions.data||[]).map(row=>row.permission))
+      const granted=(permissions.data||[]).map(row=>row.permission)
+      setGrants(granted)
+      if(granted.includes('catalog.view') && granted.includes('sales.create')){
+        const productResult=await supabase.from('products').select('id',{count:'exact',head:true}).eq('organization_id',ctx.organization.id).eq('active',true)
+        setActiveProductCount(productResult.error ? null : productResult.count ?? 0)
+      }else setActiveProductCount(null)
       setRoleKeys(assignedRoles.error ? [ctx.user?.role].filter(Boolean) : (assignedRoles.data||[]).map(row=>row.role).filter(Boolean))
       setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],deliveries:work.data?.deliveries||[],attendance:work.data?.attendance||{}})
     }catch(error){setFailure(error?.message||'Could not load your work.')}finally{setLoading(false)}
@@ -59,6 +65,10 @@ export default function MyWorkPage(){
   const roleWorkflows=jobWorkflowReadiness(roleKeys,grants,enabledModules)
   const readyWorkflows=roleWorkflows.filter(workflow=>workflow.ready)
   const blockedWorkflows=roleWorkflows.filter(workflow=>!workflow.ready)
+  const salesRole=roleKeys.some(role=>['cashier','salesperson'].includes(role)) && can('sales.create')
+  const driverRole=roleKeys.includes('delivery_driver') && can('fleet.assigned')
+  const sellingBlocked=salesRole && (!enable('pos') || activeProductCount===0)
+  const drivingBlocked=driverRole && (!enable('fleet') || data.deliveries.length===0)
   const actions=[
     enable('pos')&&can('sales.create')&&['/pos','Open point of sale','Process checkout'],
     enable('sales')&&can('sales.view')&&['/sales','Sales and customers','Review your sales'],
@@ -89,6 +99,14 @@ export default function MyWorkPage(){
     </div><button type="button" className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold" onClick={()=>{setLoading(true);load()}}>Refresh</button></div>
     {failure&&<p role="alert" className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{failure}</p>}
     {message&&<p role="status" className="mb-4 rounded-xl border border-emerald-500/30 p-3 text-sm">{message}</p>}
+    {(sellingBlocked||drivingBlocked)&&<section className="page-card mb-5 border border-amber-500/30 p-5" role="status">
+      <h2 className="text-base font-black">Work setup needed</h2>
+      {salesRole&&!enable('pos')&&<p className="mt-2 text-sm text-muted">Sales access is assigned, but Point of Sale is disabled for this business. The business owner must enable POS in Business Setup before checkout is available.</p>}
+      {salesRole&&activeProductCount===0&&<p className="mt-2 text-sm text-muted">There are no active products or services to sell. Ask an authorized catalog manager to enable Inventory and add an item.</p>}
+      {driverRole&&!enable('fleet')&&<p className="mt-2 text-sm text-muted">Driver access is assigned, but Fleet & Delivery is disabled. The owner must enable it before managers can create delivery trips.</p>}
+      {driverRole&&enable('fleet')&&data.deliveries.length===0&&<p className="mt-2 text-sm text-muted">No active delivery trip is assigned to you. Ask a dispatcher or manager to create and allocate a delivery.</p>}
+      {can('settings.manage')&&<Link href="/setup" className="btn-secondary mt-3 inline-flex rounded-xl px-4 py-2 text-xs font-bold">Configure business modules</Link>}
+    </section>}
     <section className="page-card mb-6 p-5">
       <h2 className="text-lg font-black">Your job actions</h2>
       <p className="mt-1 text-xs text-muted">These actions are based on your current roles and saved business permissions. Tasks and deliveries must still be assigned by your manager. This page cannot grant extra rights.</p>
