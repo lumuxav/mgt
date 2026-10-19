@@ -247,6 +247,7 @@ export default function UsersPage() {
             <div className="mb-4">
               <h2 className="page-section-title">Invite staff member</h2>
               <p className="mt-1 text-xs text-muted">MGT emails the invitation. The employee chooses their own password; administrators never see it.</p>
+              <p className="mt-2 text-xs text-muted">Choose Cashier or Salesperson for selling, Storekeeper for stock operations, or Delivery Driver for assigned trips. General Employee is not a selling role. The assigned business modules must also be enabled.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <input required className="input-base" placeholder="Full name" value={invite.full_name} onChange={(event) => setInvite({ ...invite, full_name: event.target.value })} />
@@ -259,7 +260,7 @@ export default function UsersPage() {
                 {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
               </select>
             </div>
-            {invitationReadiness.length>0&&<div className="mt-4 rounded-xl border border-[var(--line)] p-3 text-xs"><strong>What this employee will be able to do</strong><p className="mt-1 text-muted">Permissions follow the chosen role. Missing access is never granted automatically.</p><div className="mt-2 space-y-2">{invitationReadiness.map(flow=><p key={flow.label}><strong>{flow.ready?'Ready':'Needs setup'} · {flow.label}</strong>{!flow.ready&&<span className="block text-muted">{flow.missingModule?'Enable '+flow.module+' in Business Setup. ':''}{flow.missingPermissions.length?'Grant '+flow.missingPermissions.join(', ')+' in Roles & Permissions.':''}</span>}</p>)}</div></div>}
+            {canManageRoles&&invitationReadiness.length>0&&<div className="mt-4 rounded-xl border border-[var(--line)] p-3 text-xs"><strong>What this employee will be able to do</strong><p className="mt-1 text-muted">Permissions follow the chosen role. Missing access is never granted automatically.</p><div className="mt-2 space-y-2">{invitationReadiness.map(flow=><p key={flow.label}><strong>{flow.ready?'Ready':'Needs setup'} · {flow.label}</strong>{!flow.ready&&<span className="block text-muted">{flow.missingModule?'Enable '+flow.module+' in Business Setup. ':''}{flow.missingPermissions.length?'Grant '+flow.missingPermissions.join(', ')+' in Roles & Permissions.':''}</span>}</p>)}</div></div>}
             <button disabled={busy} className="btn-primary mt-4 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-50">{busy ? 'Sending...' : 'Send invitation'}</button>
           </form>
 
@@ -294,7 +295,7 @@ export default function UsersPage() {
                         <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${user.active === false ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-600'}`}>{user.active === false ? 'Disabled' : 'Active'}</span>
                       </div>
                       <p className="mt-1 text-sm text-muted">{user.email || 'No email recorded'}</p>
-                      {jobWorkflowReadiness([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])],enabledModules).map(flow=><p key={flow.label} className="mt-1 text-xs text-muted">{flow.ready?'Ready':'Setup needed'} · {flow.label}{!flow.ready?' — '+[flow.missingModule?'enable '+flow.module:null,...flow.missingPermissions].filter(Boolean).join(', '):''}</p>)}
+                      {canManageRoles&&jobWorkflowReadiness([user.role,...(user.additional_roles||[])], [...new Set([...(rolePreview(user.role)),...(user.additional_roles||[]).flatMap(rolePreview)])],enabledModules).map(flow=><p key={flow.label} className="mt-1 text-xs text-muted">{flow.ready?'Ready':'Setup needed'} · {flow.label}{!flow.ready?' — '+[flow.missingModule?'enable '+flow.module:null,...flow.missingPermissions].filter(Boolean).join(', '):''}</p>)}
                       <div className="mt-3 grid gap-1 text-xs text-muted sm:grid-cols-2"><p>Created: {prettyDate(user.auth_created_at || user.created_at)}</p><p>Last sign in: {prettyDate(user.last_sign_in_at)}</p></div>
                     </div>
 
