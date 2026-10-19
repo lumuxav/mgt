@@ -38,6 +38,7 @@ test('custom job roles derive suggestions from their saved grants, never admin p
   assert.deepEqual(missingWorkModules(['custom_sales_agent'],[],['sales.create','catalog.view']),['pos','inventory'])
   assert.deepEqual(missingWorkModules(['custom_technician'],[],['services.assigned']),['services'])
   assert.deepEqual(missingWorkModules(['custom_role'],[],['users.manage','roles.manage']),[])
+  assert.deepEqual(missingWorkModules(['employee','custom_sales_agent'],[],['sales.create','catalog.view']),['pos','inventory'])
 })
 
 test('staff UI requires owner confirmation and current organization-scoped configuration',()=>{
