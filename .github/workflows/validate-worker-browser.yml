@@ -75,6 +75,18 @@ jobs:
           if(!old.includes(anchor))throw Error('MGT isolation guard unexpectedly changed')
           fs.writeFileSync(file,old.replace(anchor,"  if (url === 'http://127.0.0.1:54321') return url\n"+anchor))
           console.log('Allow local E2E URL in ephemeral runner only; original repository guard unchanged')
+          // The production CSP must never authorize localhost. This change
+          // lives ONLY in the throwaway GitHub runner and restores real-browser
+          // calls to the local Supabase API while keeping production unchanged.
+          const nextConfig='next.config.mjs'
+          let nextSource=fs.readFileSync(nextConfig,'utf8')
+          const strictCsp='"connect-src \'self\' https://*.supabase.co wss://*.supabase.co"'
+          if(!nextSource.includes(strictCsp))throw Error('Production CSP unexpectedly changed')
+          nextSource=nextSource.replace(strictCsp,'"connect-src \'self\' http://127.0.0.1:54321 https://*.supabase.co wss://*.supabase.co"')
+          // HTTPS upgrades on localhost would make GoTrue unavailable.
+          nextSource=nextSource.replace('  "upgrade-insecure-requests",','  // CI LOCAL ONLY: no upgrade for local http Supabase')
+          fs.writeFileSync(nextConfig,nextSource)
+          console.log('Local Supabase allowed in ephemeral browser-test CSP only')
           // Login diagnostics are local-runner-only and never print actual credentials.
           const login='app/login/page.js'
           const loginSource=fs.readFileSync(login,'utf8')
