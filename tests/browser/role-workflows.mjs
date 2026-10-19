@@ -101,8 +101,19 @@ try{
   ['delivery_driver',async(page)=>{
    await ready(page,'/my-work','My Work')
    await page.getByText('CI-E2E-DLV-001').waitFor({state:'visible',timeout:deadline})
-   await page.getByPlaceholder('Recipient name (for successful delivery)').fill('CI Receipt Tester')
-   await page.getByRole('button',{name:'Confirm delivered'}).click()
+   const deliveryCard=page.locator('article').filter({hasText:'CI-E2E-DLV-001'})
+   console.log('DRIVER_CI_BEFORE '+JSON.stringify({
+     card:(await deliveryCard.innerText()).slice(0,480),
+     buttons:await deliveryCard.getByRole('button').allTextContents()
+   }))
+   const proofInput=deliveryCard.getByPlaceholder('Recipient name (for successful delivery)')
+   await proofInput.fill('CI Receipt Tester')
+   console.log('DRIVER_CI_AFTER '+JSON.stringify({
+     card:(await deliveryCard.innerText()).slice(0,480),
+     proof:await proofInput.inputValue(),
+     buttons:await deliveryCard.getByRole('button').allTextContents()
+   }))
+   await deliveryCard.getByRole('button',{name:'Confirm delivered'}).click({timeout:6000})
    await page.getByText('Work updated successfully.').waitFor({state:'visible',timeout:deadline})
    check(true,'driver submitted proof of delivery through the real browser')
   }]
