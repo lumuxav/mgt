@@ -122,7 +122,7 @@ try{
    }
    console.log('DRIVER_CI_AFTER '+JSON.stringify(after))
    if(!after.buttons.some(x=>x.includes('Confirm delivered')))throw Error('Proof input removed delivery confirmation: '+JSON.stringify(after).slice(0,1300))
-   await page.getByRole('button',{name:'Confirm delivered'}).click({timeout:6000})
+   await deliveryCard.getByRole('button',{name:'Confirm delivered'}).click({timeout:6000})
    await page.getByText('Work updated successfully.').waitFor({state:'visible',timeout:deadline})
    await page.getByText('CI-E2E-DLV-001').waitFor({state:'hidden',timeout:deadline})
    check(true,'driver confirmed successful delivery with recipient name')
