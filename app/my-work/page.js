@@ -5,12 +5,14 @@ import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
 import { moduleEnabled } from '../../lib/platformConfig'
+import { jobWorkflowReadiness } from '../../lib/workspaceCatalog'
 
 const pretty = value => String(value||'').replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase())
 export default function MyWorkPage(){
   const [context,setContext]=useState(null)
   const [business,setBusiness]=useState(null)
   const [grants,setGrants]=useState([])
+  const [roleKeys,setRoleKeys]=useState([])
   const [data,setData]=useState({tasks:[],jobs:[],deliveries:[],attendance:{}})
   const [deliveryProof,setDeliveryProof]=useState({})
   const [loading,setLoading]=useState(true)
@@ -25,14 +27,15 @@ export default function MyWorkPage(){
       if(!ctx?.organization?.id)throw new Error('You need an active business workspace.')
       const authoritative=await loadBusinessConfigFromDatabase()
       if(!authoritative?.organizationId || authoritative.organizationId!==ctx.organization.id) throw new Error('Business module configuration unavailable.')
-      const [work,permissions]=await Promise.all([
-        supabase.rpc('mgt_my_work'),supabase.rpc('current_permissions')
+      const [work,permissions,assignedRoles]=await Promise.all([
+        supabase.rpc('mgt_my_work'),supabase.rpc('current_permissions'),supabase.rpc('mgt_current_roles')
       ])
       if(work.error)throw work.error
       if(permissions.error)throw permissions.error
       setContext(ctx)
       setBusiness(authoritative)
       setGrants((permissions.data||[]).map(row=>row.permission))
+      setRoleKeys(assignedRoles.error ? [ctx.user?.role].filter(Boolean) : (assignedRoles.data||[]).map(row=>row.role).filter(Boolean))
       setData({tasks:work.data?.tasks||[],jobs:work.data?.jobs||[],deliveries:work.data?.deliveries||[],attendance:work.data?.attendance||{}})
     }catch(error){setFailure(error?.message||'Could not load your work.')}finally{setLoading(false)}
   }
@@ -52,6 +55,10 @@ export default function MyWorkPage(){
   const can=permission=>grants.includes(permission)
   const enable=key=>moduleEnabled(business,key)
   const attendanceEnabled=enable('hr')&&can('attendance.use')
+  const enabledModules=business?.enabledModules||[]
+  const roleWorkflows=jobWorkflowReadiness(roleKeys,grants,enabledModules)
+  const readyWorkflows=roleWorkflows.filter(workflow=>workflow.ready)
+  const blockedWorkflows=roleWorkflows.filter(workflow=>!workflow.ready)
   const actions=[
     enable('pos')&&can('sales.create')&&['/pos','Open point of sale','Process checkout'],
     enable('sales')&&can('sales.view')&&['/sales','Sales and customers','Review your sales'],
@@ -82,6 +89,13 @@ export default function MyWorkPage(){
     </div><button type="button" className="btn-secondary rounded-xl px-4 py-2 text-sm font-bold" onClick={()=>{setLoading(true);load()}}>Refresh</button></div>
     {failure&&<p role="alert" className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{failure}</p>}
     {message&&<p role="status" className="mb-4 rounded-xl border border-emerald-500/30 p-3 text-sm">{message}</p>}
+    <section className="page-card mb-6 p-5">
+      <h2 className="text-lg font-black">Your job actions</h2>
+      <p className="mt-1 text-xs text-muted">These actions are based on your current roles and saved business permissions. Tasks and deliveries must still be assigned by your manager. This page cannot grant extra rights.</p>
+      {roleKeys.length>0&&<p className="mt-2 text-xs text-muted">Assigned roles: {roleKeys.map(pretty).join(' + ')}</p>}
+      {readyWorkflows.length>0?<div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{readyWorkflows.map(flow=><Link href={flow.href} key={flow.label} className="rounded-xl border border-[var(--line)] p-4 hover:border-[var(--accent)]"><strong className="text-sm">{flow.label}</strong><p className="mt-2 text-xs text-muted">{flow.detail}</p>{flow.requiresAssignment&&<p className="mt-2 text-xs text-muted">An assignment is required to see work.</p>}</Link>)}</div>:<p className="mt-3 text-sm text-muted">No job operations are enabled yet. Ask the business owner to assign a suitable role and activate its module.</p>}
+      {blockedWorkflows.length>0&&<details className="mt-5 rounded-xl border border-[var(--line)] p-4"><summary className="cursor-pointer text-sm font-bold">Other responsibilities requiring setup ({blockedWorkflows.length})</summary><div className="mt-3 space-y-2">{blockedWorkflows.map(flow=><div key={flow.label} className="text-xs"><strong>{flow.label}</strong><p className="text-muted">{flow.missingModule?'Business module '+flow.module+' is disabled. ':''}{flow.missingPermissions.length?'Ask an authorized manager about '+flow.missingPermissions.join(', ')+'. ':''}</p></div>)}</div></details>}
+    </section>
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <div className="page-card p-5"><p className="text-sm text-muted">My open tasks</p><p className="mt-2 text-3xl font-black">{data.tasks.length}</p></div>
       <div className="page-card p-5"><p className="text-sm text-muted">My assigned service jobs</p><p className="mt-2 text-3xl font-black">{data.jobs.length}</p></div>
