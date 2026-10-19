@@ -55,6 +55,10 @@ const delivery=await checked(await admin.from('deliveries').insert({
  organization_id:company.id,source_location_id:office.id,driver_user_id:accounts.delivery_driver.id,
  delivery_number:'CI-E2E-DLV-001',status:'dispatched',destination:'CI Customer Test Address'
 }).select('id').single(),'create assigned driver delivery')
+const failedDelivery=await checked(await admin.from('deliveries').insert({
+ organization_id:company.id,source_location_id:office.id,driver_user_id:accounts.delivery_driver.id,
+ delivery_number:'CI-E2E-DLV-002',status:'dispatched',destination:'CI Failed Delivery Address'
+}).select('id').single(),'create second assigned delivery for failed-proof test')
 await checked(await admin.from('work_orders').insert({
  organization_id:foreign.id,location_id:foreignOffice.id,title:'Unrelated Company Confidential Job',
  assigned_to:accounts.foreign_owner.id,quoted_amount:555000
@@ -70,6 +74,6 @@ if(trial.error||!trial.data?.session?.access_token){
 await anonymous.auth.signOut()
 console.log('Local Supabase public-key owner password authentication verified')
 const data={accounts,orgId:company.id,officeId:office.id,otherOfficeId:otherOffice.id,
- workOrderId:workOrder.id,deliveryId:delivery.id}
+ workOrderId:workOrder.id,deliveryId:delivery.id,failedDeliveryId:failedDelivery.id}
 await fs.writeFile('/tmp/mgt-e2e-fixtures.json',JSON.stringify(data))
 console.log('Prepared '+roles.length+' disposable staff logins, one external tenant, branch-scoped service work and an assigned delivery')
