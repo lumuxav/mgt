@@ -15,12 +15,12 @@ test('cashier and seller templates show stock but cannot edit stock without anot
   }
 })
 test('workflow readiness requires module and every permission, no implicit grant', () => {
-  const [incomplete] = jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view'],['pos']).filter(item => item.label === 'Process a sale')
+  const [incomplete] = jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view'],['pos']).filter(item => item.label === 'Make a sale')
   assert.equal(incomplete.ready,false)
   assert.deepEqual(incomplete.missingPermissions,['inventory.view'])
-  const [ready] = jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view','inventory.view'],['pos']).filter(item => item.label === 'Process a sale')
+  const [ready] = jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view','inventory.view'],['pos']).filter(item => item.label === 'Make a sale')
   assert.equal(ready.ready,true)
-  assert.equal(jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view','inventory.view'],[]).find(item => item.label === 'Process a sale').ready,false)
+  assert.equal(jobWorkflowReadiness(['salesperson'],['sales.create','catalog.view','inventory.view'],[]).find(item => item.label === 'Make a sale').ready,false)
 })
 test('driver only receives assigned-work rights and never fleet dispatch', () => {
   const permissions = ROLE_TEMPLATES.find(item => item.key === 'delivery_driver').permissions
