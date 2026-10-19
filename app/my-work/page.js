@@ -119,8 +119,10 @@ export default function MyWorkPage(){
       <p className="mb-4 mt-1 text-xs text-muted">View allocated trips and record delivery evidence. Dispatch creation and reassignment remain manager-only.</p>
       {data.deliveries.length===0?<p className="text-sm text-muted">No active deliveries assigned.</p>:
         <div className="grid gap-3 md:grid-cols-2">{data.deliveries.map(d=>{
-          const proof=deliveryProof[d.id]||{recipient:'',notes:'',failure:''}
-          const setProof=changes=>setDeliveryProof(old=>({...old,[d.id]:{...(old[d.id]||{}),...changes}}))
+          const proof={recipient:'',notes:'',failure:'',...(deliveryProof[d.id]||{})}
+          const setProof=changes=>setDeliveryProof(old=>({...old,[d.id]:{
+            recipient:'',notes:'',failure:'',...(old[d.id]||{}),...changes
+          }}))
           const change=status=>run(d.id+status,()=>supabase.rpc('mgt_update_assigned_delivery',{
             p_delivery_id:d.id,p_status:status,p_recipient_name:proof.recipient||null,
             p_notes:proof.notes||null,p_failure_reason:proof.failure||null
@@ -135,8 +137,8 @@ export default function MyWorkPage(){
               <textarea className="input-base" placeholder="Delivery notes" rows={2} value={proof.notes} onChange={e=>setProof({notes:e.target.value})}/>
               <div className="flex flex-wrap gap-2">
                 {d.status==='dispatched'&&<button type="button" disabled={!!busy} className="btn-secondary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('in_transit')}>In transit</button>}
-                <button type="button" disabled={!!busy||!proof.recipient.trim()} className="btn-primary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('delivered')}>Confirm delivered</button>
-                <button type="button" disabled={!!busy||!proof.failure.trim()} className="btn-secondary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('failed')}>Report failed</button>
+                <button type="button" disabled={!!busy||!String(proof.recipient||'').trim()} className="btn-primary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('delivered')}>Confirm delivered</button>
+                <button type="button" disabled={!!busy||!String(proof.failure||'').trim()} className="btn-secondary rounded-xl px-3 py-2 text-xs font-bold" onClick={()=>change('failed')}>Report failed</button>
               </div>
             </div>}
           </article>
