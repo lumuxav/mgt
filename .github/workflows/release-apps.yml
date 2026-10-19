@@ -59,6 +59,11 @@ jobs:
           for file in MGT-Business-Suite-Test.apk MGT-Business-Suite-Windows-x64.exe MGT-Business-Suite-Linux-x64.AppImage MGT-Business-Suite-macOS-arm64.dmg MGT-Business-Suite-macOS-x64.dmg; do
             test -s "$file"
           done
+          if [ -e MGT-Business-Suite-Release.apk ] || [ -e MGT-Business-Suite-Release.aab ]; then
+            test -s MGT-Business-Suite-Release.apk
+            test -s MGT-Business-Suite-Release.aab
+          fi
+          printf 'MGT Business Suite source commit: %s\nProduction branch: %s\nWeb app: https://mgt-lake.vercel.app\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" > BUILD_INFO.txt
           sha256sum * > SHA256SUMS.txt
       - name: Prepare release notes
         shell: bash
@@ -83,7 +88,7 @@ jobs:
 
           **Signing:** The Android Test APK uses test signing and the separate com.mgt.businesssuite.test package. Windows installers are unsigned. macOS apps have an ad-hoc signature and are not Apple-notarized; operating-system verification prompts may appear. An iPhone/iPad installation is available through Safari → Share → Add to Home Screen at https://mgt-lake.vercel.app/install. There is no installable iOS IPA in this release.
 
-          SHA256SUMS.txt contains checksums for all packages. This is a private repository; GitHub access is required for downloads. See DOWNLOADS.md for installation, upgrades and signing configuration.
+          BUILD_INFO.txt identifies the exact source commit used for this release. SHA256SUMS.txt contains checksums for all packages. This is a private repository; GitHub access is required for downloads. See DOWNLOADS.md for installation, upgrades and signing configuration.
 
           Source commit: ${SOURCE_COMMIT}
           EOF
