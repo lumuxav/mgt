@@ -36,3 +36,15 @@ test('owner staff page shows module and permission blockers without auto-grant',
   assert.match(users,/Permissions follow the chosen role/)
   assert.doesNotMatch(users,/autoGrant|grantAllPermissions/)
 })
+
+test('all fifteen built-in business roles have mapped operational actions', () => {
+  for (const role of ['owner','admin','manager','branch_manager','cashier','salesperson','storekeeper','procurement_officer','accountant','hr_officer','production_staff','technician','delivery_driver','project_worker','employee']) {
+    const workflows = jobWorkflowReadiness([role],[],[])
+    assert.ok(workflows.length >= 2, role + ' should show both work and relevant setup information')
+    assert.ok(workflows.some(flow => flow.href === '/my-work'), role + ' must have a personal workspace')
+  }
+})
+test('custom roles with a usable grant can see an authorized workflow', () => {
+  const flows = jobWorkflowReadiness(['bespoke_shop_staff'], ['sales.create','catalog.view'],['pos'])
+  assert.ok(flows.some(flow => flow.href === '/pos' && flow.ready))
+})
