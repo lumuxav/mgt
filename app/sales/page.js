@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
-import { getPlatformContext } from '../../lib/platformDb'
-import { getBusinessConfig } from '../../lib/platformConfig'
+import { getPlatformContext, loadBusinessConfigFromDatabase } from '../../lib/platformDb'
+import { getBusinessConfig, moduleEnabled } from '../../lib/platformConfig'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 const sameDay = (value, date = new Date()) => new Date(value).toDateString() === date.toDateString()
 
 export default function SalesPage() {
-  const business = getBusinessConfig()
+  const [business, setBusiness] = useState(() => getBusinessConfig())
+  const [productCount, setProductCount] = useState(null)
   const [context, setContext] = useState(null)
   const [permissions, setPermissions] = useState([])
   const [sales, setSales] = useState([])
@@ -38,6 +39,8 @@ export default function SalesPage() {
   const currency = context?.organization?.currency || business.currency || 'UGX'
   const canRefund = permissions.includes('sales.refund')
   const canTakePayment = permissions.includes('sales.create') || permissions.includes('finance.manage')
+  const canSell = permissions.includes('sales.create')
+  const posReady = moduleEnabled(business, 'pos')
 
   const load = async () => {
     setLoading(true)
@@ -46,6 +49,8 @@ export default function SalesPage() {
       setContext(ctx)
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
+      const authoritative = await loadBusinessConfigFromDatabase()
+      if (authoritative?.organizationId === org) setBusiness(authoritative)
 
       const [permissionRes, salesRes, customersRes, paymentsRes, returnsRes, balancesRes] = await Promise.all([
         supabase.rpc('current_permissions'),
@@ -63,6 +68,11 @@ export default function SalesPage() {
       for (const result of [permissionRes, salesRes, customersRes, paymentsRes, returnsRes, balancesRes]) if (result.error) throw result.error
 
       setPermissions((permissionRes.data || []).map((row) => row.permission))
+      const grants = new Set((permissionRes.data || []).map(row => row.permission))
+      if (grants.has('catalog.view')) {
+        const countResult = await supabase.from('products').select('id', { count: 'exact', head: true }).eq('organization_id', org).eq('active', true)
+        setProductCount(countResult.error ? null : countResult.count ?? 0)
+      } else setProductCount(null)
       setSales(salesRes.data || [])
       setCustomers(customersRes.data || [])
       setCustomerBalances(balancesRes.data || [])
@@ -206,7 +216,7 @@ export default function SalesPage() {
           <h1 className="page-title">Sales, Credit & Returns</h1>
           <p className="page-subtitle">Receipts, customer balances, repayments and returns across the business.</p>
         </div>
-        <div className="flex flex-wrap gap-2"><Link href="/payments" className="btn-secondary rounded-xl px-4 py-2 text-sm font-black">External Payments</Link><Link href="/pos" className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Open POS</Link></div>
+        <div className="flex flex-wrap gap-2">{moduleEnabled(business,'payments') && (permissions.includes('payments.view')||permissions.includes('payments.request')) && <Link href="/payments" className="btn-secondary rounded-xl px-4 py-2 text-sm font-black">External Payments</Link>}{canSell && posReady && <Link href="/pos" className="btn-primary rounded-xl px-4 py-2 text-sm font-black">Make a Sale · POS</Link>}</div>
       </div>
 
       {message && <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${message.type === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-500' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'}`}>{message.text}</div>}
@@ -227,6 +237,15 @@ export default function SalesPage() {
           <button key={key} type="button" onClick={() => setTab(key)} className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-black ${tab === key ? 'bg-[var(--panel)] text-accent shadow-sm' : 'text-muted'}`}>{label}</button>
         ))}
       </div>
+
+      {canSell && (!posReady || productCount === 0) && (
+        <section className="page-card mb-5 border border-amber-500/30 p-4" role="status">
+          <strong className="text-sm">Before you can record a new sale</strong>
+          {!posReady && <p className="mt-2 text-sm text-muted">Point of Sale is disabled in this business. Sales & Credit shows records and repayments; it does not create checkout transactions. The owner must enable Point of Sale in Business Setup.</p>}
+          {productCount === 0 && <p className="mt-2 text-sm text-muted">This business has no active products or services to sell. An authorized catalog manager must add at least one item after Inventory is enabled.</p>}
+          {permissions.includes('settings.manage') && <Link href="/setup" className="btn-primary mt-3 inline-flex rounded-xl px-4 py-2 text-xs font-bold">Open Business Setup</Link>}
+        </section>
+      )}
 
       {tab === 'sales' && (
         <section className="space-y-4">
