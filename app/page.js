@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
 import { getBusinessConfig, getDefaultLocation, moduleEnabled } from '../lib/platformConfig'
-import { getPlatformContext, isUniversalSchemaMissing } from '../lib/platformDb'
+import { getPlatformContext, isUniversalSchemaMissing, loadBusinessConfigFromDatabase } from '../lib/platformDb'
 import ProfileAvatar from './components/ProfileAvatar'
 
 const day = (value) => new Date(value).toISOString().slice(0, 10)
@@ -28,6 +28,7 @@ export default function HomePage() {
   const [backendReady, setBackendReady] = useState(true)
   const [loading, setLoading] = useState(true)
   const [permissions, setPermissions] = useState([])
+  const [jobRoles, setJobRoles] = useState([])
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
@@ -37,7 +38,8 @@ export default function HomePage() {
         if (!platform.session) return (window.location.href = '/login')
         setUserId(platform.session.user.id)
         setProfile(platform.user)
-        setBusiness(getBusinessConfig())
+        const authoritative = await loadBusinessConfigFromDatabase()
+        setBusiness(authoritative || getBusinessConfig())
         setContext(platform)
         if (!platform.organization?.id) {
           setBackendReady(false)
@@ -49,9 +51,13 @@ export default function HomePage() {
         const start = `${today}T00:00:00.000Z`
         const end = `${today}T23:59:59.999Z`
 
-        const { data: rows, error: permissionError } = await supabase.rpc('current_permissions')
+        const [{ data: rows, error: permissionError }, rolesResult] = await Promise.all([
+          supabase.rpc('current_permissions'),
+          supabase.rpc('mgt_current_roles'),
+        ])
         if (permissionError) throw permissionError
         const grants = new Set((rows || []).map(row => row.permission))
+        setJobRoles(rolesResult.error ? [platform.user?.role].filter(Boolean) : (rolesResult.data || []).map(row => row.role).filter(Boolean))
         setPermissions([...grants])
         const accessible = (permission, query) => grants.has(permission) ? query() : Promise.resolve({ data: [], count: 0, error: null })
         const [salesRes, allSalesRes, productsRes, customersRes, expensesRes, purchasesRes, workOrdersRes] = await Promise.all([
@@ -145,7 +151,7 @@ export default function HomePage() {
         <section className="home-profile-card" aria-label="User profile summary">
           <ProfileAvatar userId={userId} initials={initials} className="home-profile-avatar" />
           <div className="home-profile-name">{profile?.full_name || 'Business user'}</div>
-          <div className="home-profile-role">{profile?.role?.replaceAll('_', ' ') || 'user'}</div>
+          <div className="home-profile-role">{jobRoles.length ? jobRoles.map(role => role.replaceAll('_',' ')).join(' · ') : (profile?.role?.replaceAll('_', ' ') || 'user')}</div>
           <div className="home-profile-stats">
             {can('sales.view') && <div><strong>{metrics.salesToday}</strong><span>Sales today</span></div>}
             {can('catalog.view') && <div><strong>{metrics.products}</strong><span>Active catalog items</span></div>}
