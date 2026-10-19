@@ -27,7 +27,7 @@ test('driver only receives assigned-work rights and never fleet dispatch', () =>
   assert.ok(permissions.includes('fleet.assigned'))
   assert.ok(!permissions.includes('fleet.dispatch'))
   assert.ok(!permissions.includes('fleet.manage'))
-  assert.equal(jobWorkflowReadiness(['delivery_driver'],permissions,['fleet'])[0].ready,true)
+  assert.equal(jobWorkflowReadiness(['delivery_driver'],permissions,['fleet','dashboard']).find(flow => flow.label === 'My assigned deliveries').ready,true)
 })
 test('owner staff page shows module and permission blockers without auto-grant', () => {
   const users = read('app/users/page.js')
