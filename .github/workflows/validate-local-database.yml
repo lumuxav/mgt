@@ -64,7 +64,8 @@ jobs:
             supabase/tests/universal_logic_regressions.sql \
             supabase/tests/access_and_banking_regressions.sql \
             supabase/tests/business_intelligence_regressions.sql \
-            supabase/tests/production_workflow_integrity.sql
+            supabase/tests/production_workflow_integrity.sql \
+            supabase/tests/scoped_reporting_service_refunds.sql
           do
             echo "::group::Checking established business SQL regressions: $suite"
             docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$suite"

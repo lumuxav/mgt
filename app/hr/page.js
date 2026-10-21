@@ -80,7 +80,7 @@ export default function HRPage(){
         supabase.from('leave_types').select('*').eq('organization_id',org).eq('active',true).order('name'),
         supabase.from('leave_requests').select('*').eq('organization_id',org).order('created_at',{ascending:false}).limit(1000),
         supabase.from('employee_pay_components').select('*').eq('organization_id',org).order('created_at',{ascending:false}),
-        supabase.from('payroll_periods').select('*').eq('organization_id',org).order('start_date',{ascending:false}).limit(200),
+        supabase.rpc('get_scoped_payroll_periods').select('*').eq('organization_id',org).order('start_date',{ascending:false}).limit(200),
         supabase.from('payroll_entries').select('*').eq('organization_id',org).order('created_at',{ascending:false}).limit(3000),
         supabase.from('employee_commissions').select('*').eq('organization_id',org).order('created_at',{ascending:false}).limit(2000),
         supabase.from('bank_accounts').select('id,name,account_type,provider').eq('organization_id',org).eq('active',true).order('name'),

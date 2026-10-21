@@ -44,7 +44,7 @@ export default function FinancePage() {
         supabase.rpc('current_permissions'),
         supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
         supabase.from('expenses').select('id,location_id,category,description,amount,payment_method,reference,notes,recorded_by,created_at,locations(name),users!expenses_recorded_by_fkey(full_name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
-        supabase.from('bank_accounts').select('id,name,account_type,provider,account_reference,opening_balance,active,created_at').eq('organization_id',org).eq('active',true).order('name'),
+        supabase.rpc('get_bank_account_summaries'),
         supabase.from('banking_transactions').select('id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by,created_at,bank_accounts(name),locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(800),
         supabase.from('payments').select('id,location_id,customer_id,supplier_id,sale_id,purchase_id,direction,payment_type,method,amount,reference,notes,received_by,till_session_id,created_at,locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(1000),
         supabase.from('till_sessions').select('id,location_id,user_id,status,opening_cash,expected_cash,counted_cash,variance,opened_at,closed_at,locations(name),users(full_name)').eq('organization_id',org).order('opened_at',{ascending:false}).limit(300),
@@ -77,11 +77,10 @@ export default function FinancePage() {
   const bankBalances = useMemo(()=>{
     const map={}
     for(const account of bankAccounts){
-      const movement = bankTx.filter((tx)=>tx.bank_account_id===account.id).reduce((sum,tx)=>sum + (tx.transaction_type==='withdrawal' ? -Number(tx.amount||0) : Number(tx.amount||0)),0)
-      map[account.id]=Number(account.opening_balance||0)+movement
+      map[account.id]=account.balance_visible ? Number(account.balance||0) : null
     }
     return map
-  },[bankAccounts,bankTx])
+  },[bankAccounts])
 
   const openTills = tills.filter((till)=>till.status==='open')
   const todayIn = payments.filter((payment)=>payment.direction==='in' && sameDay(payment.created_at)).reduce((sum,payment)=>sum+Number(payment.amount||0),0)
@@ -221,7 +220,7 @@ export default function FinancePage() {
         <div className="page-card p-4"><p className="text-xs text-muted">Money received today</p><strong className="mt-2 block text-2xl text-emerald-600">{money(todayIn,currency)}</strong></div>
         <div className="page-card p-4"><p className="text-xs text-muted">Money paid out today</p><strong className="mt-2 block text-2xl text-red-500">{money(todayOut,currency)}</strong></div>
         <div className="page-card p-4"><p className="text-xs text-muted">Expenses today</p><strong className="mt-2 block text-2xl text-amber-600">{money(todayExpenses,currency)}</strong></div>
-        <div className="page-card p-4"><p className="text-xs text-muted">Bank / financial accounts</p><strong className="mt-2 block text-2xl">{money(bankTotal,currency)}</strong></div>
+        <div className="page-card p-4"><p className="text-xs text-muted">Bank / financial accounts</p><strong className="mt-2 block text-2xl">{bankAccounts.some(account=>!account.balance_visible)?'Balance restricted':money(bankTotal,currency)}</strong></div>
       </section>
 
       <div className="mb-5 flex gap-2 overflow-x-auto rounded-2xl bg-[var(--panel-2)] p-1">
@@ -240,7 +239,7 @@ export default function FinancePage() {
             <h2 className="font-black">Financial accounts</h2>
             <div className="mt-4 space-y-3">
               {!bankAccounts.length && <p className="text-sm text-muted">No bank or mobile-money accounts configured.</p>}
-              {bankAccounts.map((account)=><div key={account.id} className="rounded-2xl bg-[var(--panel-2)] p-4"><div className="flex items-start justify-between gap-3"><div><strong>{account.name}</strong><p className="mt-1 text-xs text-muted">{account.provider || account.account_type}{account.account_reference ? ` · ${account.account_reference}` : ''}</p></div><strong>{money(bankBalances[account.id],currency)}</strong></div></div>)}
+              {bankAccounts.map((account)=><div key={account.id} className="rounded-2xl bg-[var(--panel-2)] p-4"><div className="flex items-start justify-between gap-3"><div><strong>{account.name}</strong><p className="mt-1 text-xs text-muted">{account.provider || account.account_type}{account.account_reference ? ` · ${account.account_reference}` : ''}</p></div><strong>{account.balance_visible?money(bankBalances[account.id],currency):'Balance restricted'}</strong></div></div>)}
             </div>
           </div>
 
@@ -329,7 +328,7 @@ export default function FinancePage() {
           <div className="space-y-5">
             <div className="page-card overflow-hidden">
               <div className="border-b border-[var(--line)] p-4"><strong>Account balances</strong></div>
-              <div className="divide-y divide-[var(--line)]">{bankAccounts.map((account)=><div key={account.id} className="flex justify-between gap-4 p-4"><div><strong>{account.name}</strong><p className="mt-1 text-xs text-muted">{account.provider || account.account_type}{account.account_reference? ` · ${account.account_reference}`:''}</p></div><strong>{money(bankBalances[account.id],currency)}</strong></div>)}</div>
+              <div className="divide-y divide-[var(--line)]">{bankAccounts.map((account)=><div key={account.id} className="flex justify-between gap-4 p-4"><div><strong>{account.name}</strong><p className="mt-1 text-xs text-muted">{account.provider || account.account_type}{account.account_reference? ` · ${account.account_reference}`:''}</p></div><strong>{account.balance_visible?money(bankBalances[account.id],currency):'Balance restricted'}</strong></div>)}</div>
             </div>
             <div className="page-card overflow-hidden">
               <div className="border-b border-[var(--line)] p-4"><strong>Banking history</strong></div>

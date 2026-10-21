@@ -71,8 +71,8 @@ export default function ReportsPage(){
         ]=await Promise.all([
           supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
           supabase.from('users').select('id,full_name,role,default_location_id,active').eq('organization_id',org).eq('active',true),
-          supabase.from('customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
-          supabase.from('suppliers').select('id,name,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
+          supabase.rpc('get_scoped_customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
+          supabase.rpc('get_scoped_suppliers').select('id,name,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
           supabase.from('products').select('id,name,sku,cost_price,selling_price,reorder_level,track_inventory,active').eq('organization_id',org).eq('active',true),
           supabase.from('sales').select('id,sale_number,location_id,customer_id,sold_by,total_amount,amount_paid,refunded_amount,status,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(8000),
           supabase.from('sale_items').select('id,sale_id,product_id,description,quantity,unit_price,unit_cost,discount_amount,tax_amount,line_total').limit(25000),
