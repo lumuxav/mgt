@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
@@ -12,6 +12,12 @@ import { checkoutRequest, finishCheckout } from '../../lib/checkoutRequest'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 const blankPayment = () => ({ method: 'cash', amount: '', reference: '' })
+const repriceCart = (cart, products, mode) => cart.map(line => {
+  const product = products.find(item => item.id === line.product_id)
+  if (!product || line.custom_price) return line
+  const price = mode === 'wholesale' ? product.wholesale_price ?? product.selling_price : product.selling_price
+  return { ...line, unit_price: Number(price || 0) }
+})
 
 export default function PosPage() {
   const business = getBusinessConfig()
@@ -74,11 +80,10 @@ export default function PosPage() {
     setTillPayments(payments)
   }
 
-  const load = async () => {
-    setLoading(true)
-    setMessage(null)
+  const load = async (initialContext) => {
     try {
-      const ctx = await getPlatformContext()
+      const ctx = initialContext || await getPlatformContext()
+      setMessage(null)
       setContext(ctx)
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
 
@@ -100,6 +105,7 @@ export default function PosPage() {
       const perms = (permissionRes.data || []).map((row) => row.permission)
       setPermissions(perms)
       setProducts(productsRes.data || [])
+      setCart(current => repriceCart(current, productsRes.data || [], pricingMode))
       setCustomers(customersRes.data || [])
       setLocations(locationsRes.data || [])
 
@@ -115,7 +121,19 @@ export default function PosPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  const initialize = useEffectEvent(ctx => load(ctx))
+  const initializationFailed = useEffectEvent(error => {
+    setMessage({ type: 'error', text: error.message || 'Could not open POS.' })
+    setLoading(false)
+  })
+  useEffect(() => {
+    let cancelled = false
+    getPlatformContext().then(
+      ctx => { if (!cancelled) initialize(ctx) },
+      error => { if (!cancelled) initializationFailed(error) },
+    )
+    return () => { cancelled = true }
+  }, [])
 
   const changeLocation = async (id) => {
     setLocationId(id)
@@ -132,16 +150,10 @@ export default function PosPage() {
     }
   }
 
-  useEffect(() => {
-    setCart((current) => current.map((line) => {
-      const product = products.find((item) => item.id === line.product_id)
-      if (!product || line.custom_price) return line
-      const nextPrice = pricingMode === 'wholesale'
-        ? Number(product.wholesale_price ?? product.selling_price ?? 0)
-        : Number(product.selling_price || 0)
-      return { ...line, unit_price: nextPrice }
-    }))
-  }, [pricingMode, products])
+  const changePricingMode = (mode) => {
+    setPricingMode(mode)
+    setCart(current => repriceCart(current, products, mode))
+  }
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -331,8 +343,8 @@ export default function PosPage() {
       setCustomerId('')
       setSaleDiscount('0')
       setNotes('')
-      setMessage({ type: 'success', text: `Sale ${data.sale_number} completed successfully.` })
       await load()
+      setMessage({ type: 'success', text: `Sale ${data.sale_number} completed successfully.` })
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Sale could not be completed.' })
     } finally {
@@ -380,9 +392,9 @@ export default function PosPage() {
         </select>
         <div className="flex rounded-xl border border-[var(--line)] bg-[var(--panel)] p-1">
           {['retail','wholesale'].map((mode) => (
-            <button key={mode} type="button" onClick={() => setPricingMode(mode)} className={`rounded-lg px-4 py-2 text-xs font-black capitalize ${pricingMode === mode ? 'bg-[var(--accent)] text-white' : 'text-muted'}`}>{mode}</button>
+            <button key={mode} type="button" onClick={() => changePricingMode(mode)} className={`rounded-lg px-4 py-2 text-xs font-black capitalize ${pricingMode === mode ? 'bg-[var(--accent)] text-white' : 'text-muted'}`}>{mode}</button>
           ))}
-          {canDiscount && <button type="button" onClick={() => setPricingMode('custom')} className={`rounded-lg px-4 py-2 text-xs font-black ${pricingMode === 'custom' ? 'bg-[var(--accent)] text-white' : 'text-muted'}`}>Custom</button>}
+          {canDiscount && <button type="button" onClick={() => changePricingMode('custom')} className={`rounded-lg px-4 py-2 text-xs font-black ${pricingMode === 'custom' ? 'bg-[var(--accent)] text-white' : 'text-muted'}`}>Custom</button>}
         </div>
         <div className={`rounded-xl border px-4 py-2 text-xs font-bold ${till ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' : 'border-amber-500/30 bg-amber-500/10 text-amber-600'}`}>
           {till ? `Till open · expected ${money(expectedTillCash, currency)}` : 'Till closed'}

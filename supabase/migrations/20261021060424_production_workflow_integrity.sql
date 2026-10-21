@@ -603,6 +603,147 @@ begin
 end; $function$;
 
 
+CREATE OR REPLACE FUNCTION public.review_approval_request(p_request_id uuid, p_decision text, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_req public.approval_requests%rowtype;
+ v_product public.products%rowtype;
+ v_product_id uuid;
+ v_delta numeric(18,3);
+ v_reason text;
+ v_current numeric(18,3);
+ v_new numeric(18,3);
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not public.has_permission('approvals.manage') then raise exception 'Permission denied: approvals.manage'; end if;
+ if p_decision is null or p_decision not in ('approved','rejected') then raise exception 'Decision must be approved or rejected'; end if;
+
+ select * into v_req from public.approval_requests
+ where id=p_request_id and organization_id=v_org and status='pending' for update;
+ if not found then raise exception 'Pending approval request not found'; end if;
+ perform public.mgt_require_modules(array[case v_req.request_type when 'purchase_order' then 'purchasing' when 'production_order' then 'manufacturing' when 'stock_adjustment' then 'inventory' else 'alerts' end]);
+ if (select coalesce(require_separate_approvers,false) from public.organizations where id=v_org)
+    and v_req.requested_by=auth.uid() then
+   raise exception 'A different authorized staff member must approve this request';
+ end if;
+
+ if v_req.request_type='purchase_order' then
+  update public.purchases
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'ordered' else 'rejected' end,
+       updated_at=now()
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='production_order' then
+  update public.production_orders
+   set approval_status=case when p_decision='approved' then 'approved' else 'rejected' end,
+       status=case when p_decision='approved' then 'planned' else 'rejected' end
+   where id=v_req.entity_id::uuid and organization_id=v_org;
+
+ elsif v_req.request_type='stock_adjustment' and p_decision='approved' then
+  v_product_id:=(v_req.metadata->>'product_id')::uuid;
+  v_delta:=(v_req.metadata->>'quantity_delta')::numeric;
+  v_reason:=coalesce(v_req.metadata->>'reason','adjustment');
+
+  select * into v_product from public.products
+   where id=v_product_id and organization_id=v_org and active=true and track_inventory=true;
+  if not found then raise exception 'Adjustment product no longer available'; end if;
+
+  insert into public.stock_balances(product_id,location_id,quantity,reserved_quantity)
+   values(v_product_id,v_req.location_id,0,0) on conflict(product_id,location_id) do nothing;
+
+  select quantity into v_current from public.stock_balances
+   where product_id=v_product_id and location_id=v_req.location_id for update;
+
+  v_new:=coalesce(v_current,0)+v_delta;
+  if v_new<0 then raise exception 'Approved adjustment would create negative stock'; end if;
+  if v_new<(select reserved_quantity from public.stock_balances where product_id=v_product_id and location_id=v_req.location_id) then
+   raise exception 'Approved adjustment would consume reserved stock';
+  end if;
+
+  update public.stock_balances set quantity=v_new,updated_at=now()
+   where product_id=v_product_id and location_id=v_req.location_id;
+
+  insert into public.stock_movements(
+   organization_id,location_id,product_id,movement_type,quantity,unit_cost,reference_type,reference_id,notes,recorded_by
+  )
+  values(
+   v_org,v_req.location_id,v_product_id,v_reason,v_delta,v_product.cost_price,
+   'approved_adjustment',v_req.id,coalesce(v_req.metadata->>'notes',p_notes),auth.uid()
+  );
+ end if;
+
+ update public.approval_requests
+ set status=p_decision,reviewed_by=auth.uid(),review_notes=p_notes,reviewed_at=now()
+ where id=v_req.id;
+
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(
+  v_org,v_req.location_id,auth.uid(),'approval_'||p_decision,'approval_request',v_req.id::text,v_req.title,
+  jsonb_build_object('request_type',v_req.request_type,'entity_id',v_req.entity_id,'review_notes',p_notes)
+ );
+
+ return jsonb_build_object('approval_request_id',v_req.id,'status',p_decision,'request_type',v_req.request_type);
+end; $function$;
+
+
+CREATE OR REPLACE FUNCTION public.mgt_my_work()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare v_org uuid:=public.current_organization_id(); v_me uuid:=auth.uid();
+ v_tasks jsonb:='[]'::jsonb; v_jobs jsonb:='[]'::jsonb; v_deliveries jsonb:='[]'::jsonb;
+ v_attendance jsonb:='{}'::jsonb; v_tz text;
+begin
+ if v_org is null or v_me is null then raise exception 'Active staff account required'; end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='projects' and enabled)
+    and (public.has_permission('projects.time') or public.has_permission('projects.view')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',t.id,'project_id',t.project_id,'title',t.title,'status',t.status,
+      'priority',t.priority,'due_date',t.due_date,'progress',t.progress_percent
+    ) order by t.due_date nulls last),'[]'::jsonb) into v_tasks
+    from public.project_tasks t where t.organization_id=v_org and t.assigned_user_id=v_me
+    and t.status not in ('cancelled','completed')
+    and exists(select 1 from public.projects p where p.id=t.project_id and p.organization_id=v_org
+      and public.mgt_record_scope_allows(v_org,p.location_id,t.assigned_user_id,true));
+ end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='services' and enabled)
+    and (public.has_permission('services.assigned') or public.has_permission('services.view') or public.has_permission('services.manage')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',w.id,'number',w.job_number,'title',w.title,'status',w.status,'priority',w.priority,'due_at',w.due_at
+    ) order by w.due_at nulls last),'[]'::jsonb) into v_jobs
+    from public.work_orders w where w.organization_id=v_org
+    and (w.assigned_to=v_me or exists(select 1 from public.work_order_assignments wa where wa.work_order_id=w.id and wa.user_id=v_me))
+    and public.mgt_record_scope_allows(v_org,w.location_id,w.assigned_to,true)
+    and w.status not in ('cancelled','completed');
+ end if;
+ if exists(select 1 from public.organization_modules where organization_id=v_org and module_key='fleet' and enabled)
+    and (public.has_permission('fleet.assigned') or public.has_permission('fleet.dispatch')) then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id',d.id,'number',d.delivery_number,'destination',d.destination,'status',d.status,
+      'scheduled_at',d.scheduled_at,'contact_name',d.contact_name,'contact_phone',d.contact_phone
+    ) order by d.scheduled_at nulls last),'[]'::jsonb) into v_deliveries
+    from public.deliveries d where d.organization_id=v_org and d.driver_user_id=v_me
+    and d.status not in ('delivered','failed','cancelled')
+    and public.mgt_record_scope_allows(v_org,d.source_location_id,d.driver_user_id,true);
+ end if;
+ if public.has_permission('attendance.use') then
+    select timezone into v_tz from public.organizations where id=v_org;
+    select coalesce(jsonb_build_object('check_in',a.check_in,'check_out',a.check_out,'date',a.work_date),'{}'::jsonb)
+    into v_attendance from public.attendance a where a.organization_id=v_org and a.user_id=v_me
+      and a.work_date=(now() at time zone coalesce(v_tz,'UTC'))::date limit 1;
+ end if;
+ return jsonb_build_object('tasks',v_tasks,'jobs',v_jobs,'deliveries',v_deliveries,'attendance',coalesce(v_attendance,'{}'::jsonb));
+end; $function$;
+
+
 CREATE OR REPLACE FUNCTION public.record_customer_payment(p_customer_id uuid, p_location_id uuid, p_amount numeric, p_method text DEFAULT 'cash'::text, p_reference text DEFAULT NULL::text, p_notes text DEFAULT NULL::text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -806,9 +947,9 @@ begin
   if v_till_id is null then raise exception 'Open your till before recording a cash supplier payment'; end if;
  end if;
 
- v_opening_due:=greatest(v_supplier.opening_balance-v_supplier.opening_balance_paid,0);
+ v_opening_due:=case when public.mgt_record_scope_allows(v_org,null,null) then greatest(v_supplier.opening_balance-v_supplier.opening_balance_paid,0) else 0 end;
  select v_opening_due+coalesce(sum(greatest(total_amount-amount_paid,0)),0)
- into v_total_due from public.purchases where organization_id=v_org and supplier_id=p_supplier_id;
+ into v_total_due from public.purchases where organization_id=v_org and supplier_id=p_supplier_id and public.mgt_record_scope_allows(v_org,location_id,created_by) and approval_status in ('not_required','approved') and status not in ('draft','pending_approval','rejected','cancelled');
 
  if v_remaining>v_total_due+0.009 then raise exception 'Payment exceeds supplier outstanding balance'; end if;
 
@@ -830,7 +971,7 @@ begin
 
  for v_purchase in
   select * from public.purchases
-  where organization_id=v_org and supplier_id=p_supplier_id and greatest(total_amount-amount_paid,0)>0.009
+  where organization_id=v_org and supplier_id=p_supplier_id and public.mgt_record_scope_allows(v_org,location_id,created_by) and approval_status in ('not_required','approved') and status not in ('draft','pending_approval','rejected','cancelled') and greatest(total_amount-amount_paid,0)>0.009
   order by created_at asc for update
  loop
   exit when v_remaining<=0.009;
@@ -1164,6 +1305,342 @@ end;
 $function$;
 
 
+CREATE OR REPLACE FUNCTION public.complete_asset_maintenance(p_maintenance_id uuid, p_cost numeric DEFAULT 0, p_downtime_hours numeric DEFAULT 0, p_meter_reading numeric DEFAULT NULL::numeric, p_next_service_date date DEFAULT NULL::date, p_notes text DEFAULT NULL::text, p_payment_method text DEFAULT NULL::text, p_bank_account_id uuid DEFAULT NULL::uuid, p_reference text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();v_m public.asset_maintenance%rowtype;v_asset public.assets%rowtype;
+ v_method text:=nullif(trim(p_payment_method),'');v_till_id uuid;v_expense_id uuid;
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not public.has_permission('assets.maintenance') then raise exception 'Permission denied: assets.maintenance'; end if;
+ select * into v_m from public.asset_maintenance where id=p_maintenance_id and organization_id=v_org and status<>'completed' for update;
+ if not found then raise exception 'Open maintenance record not found'; end if;
+ select * into v_asset from public.assets where id=v_m.asset_id and organization_id=v_org for update;
+ if not found then raise exception 'Asset not found'; end if;
+ if coalesce(p_cost,0)<0 or coalesce(p_downtime_hours,0)<0 then raise exception 'Cost and downtime cannot be negative'; end if;
+
+ if coalesce(p_cost,0)>0 and v_method is not null then
+  if v_method='cash' then
+   select id into v_till_id from public.till_sessions
+    where organization_id=v_org and location_id=v_m.location_id and user_id=auth.uid() and status='open'
+    order by opened_at desc limit 1 for update;
+   if v_till_id is null then raise exception 'Open your till before paying maintenance in cash'; end if;
+  else
+   if p_bank_account_id is null then raise exception 'Choose the financial account used for maintenance payment'; end if;
+   if not exists(select 1 from public.bank_accounts where id=p_bank_account_id and organization_id=v_org and active=true) then raise exception 'Financial account not found'; end if;
+  end if;
+
+  insert into public.expenses(
+   organization_id,location_id,category,description,amount,payment_method,reference,recorded_by,notes,till_session_id,bank_account_id
+  ) values(
+   v_org,v_m.location_id,'Maintenance','Maintenance - '||v_asset.name||' - '||v_m.maintenance_number,
+   p_cost,v_method,nullif(trim(p_reference),''),auth.uid(),p_notes,v_till_id,p_bank_account_id
+  ) returning id into v_expense_id;
+
+  if v_method='cash' then
+   insert into public.payments(organization_id,location_id,direction,payment_type,method,amount,reference,notes,received_by,till_session_id)
+   values(v_org,v_m.location_id,'out','asset_maintenance','cash',p_cost,nullif(trim(p_reference),''),v_asset.name,auth.uid(),v_till_id);
+  else
+   insert into public.banking_transactions(source_expense_id,organization_id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by)
+   values(v_expense_id,v_org,v_m.location_id,p_bank_account_id,'withdrawal',p_cost,'confirmed',nullif(trim(p_reference),''),'Maintenance - '||v_asset.name,auth.uid());
+  end if;
+ end if;
+
+ update public.asset_maintenance set
+  status='completed',started_at=coalesce(started_at,now()),completed_at=now(),cost=coalesce(p_cost,0),
+  downtime_hours=coalesce(p_downtime_hours,0),meter_reading=p_meter_reading,next_service_date=p_next_service_date,
+  expense_id=v_expense_id,notes=coalesce(p_notes,notes),updated_at=now()
+ where id=v_m.id;
+
+ update public.assets set status='active',next_service_date=coalesce(p_next_service_date,next_service_date),updated_at=now() where id=v_asset.id;
+ update public.vehicles set status='available',updated_at=now()
+ where asset_id=v_asset.id and organization_id=v_org and active=true;
+
+ insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)
+ values(v_org,v_m.location_id,auth.uid(),'maintenance_completed','asset_maintenance',v_m.id::text,v_m.maintenance_number,
+  jsonb_build_object('asset_id',v_asset.id,'cost',p_cost,'downtime_hours',p_downtime_hours));
+
+ return jsonb_build_object('maintenance_id',v_m.id,'status','completed','expense_id',v_expense_id);
+end; $function$;
+
+
+CREATE OR REPLACE FUNCTION public.record_fuel_log(p_vehicle_id uuid, p_odometer numeric, p_quantity numeric, p_unit_cost numeric, p_supplier text DEFAULT NULL::text, p_reference text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_payment_method text DEFAULT NULL::text, p_bank_account_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();v_vehicle public.vehicles%rowtype;v_total numeric(18,2);
+ v_method text:=nullif(trim(p_payment_method),'');v_till_id uuid;v_expense_id uuid;v_id uuid;
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not public.has_permission('fleet.manage') then raise exception 'Permission denied: fleet.manage'; end if;
+ select * into v_vehicle from public.vehicles where id=p_vehicle_id and organization_id=v_org and active=true for update;
+ if not found then raise exception 'Vehicle not found'; end if;
+ if p_odometer<v_vehicle.odometer then raise exception 'Odometer cannot go backwards'; end if;
+ if coalesce(p_quantity,0)<=0 or coalesce(p_unit_cost,0)<0 then raise exception 'Invalid fuel quantity or cost'; end if;
+ v_total:=round(p_quantity*p_unit_cost,2);
+
+ if v_total>0 and v_method is not null then
+  if v_method='cash' then
+   select id into v_till_id from public.till_sessions
+    where organization_id=v_org and location_id=v_vehicle.location_id and user_id=auth.uid() and status='open'
+    order by opened_at desc limit 1 for update;
+   if v_till_id is null then raise exception 'Open your till before paying for fuel in cash'; end if;
+  else
+   if p_bank_account_id is null then raise exception 'Choose the financial account used for fuel'; end if;
+   if not exists(select 1 from public.bank_accounts where id=p_bank_account_id and organization_id=v_org and active=true) then raise exception 'Financial account not found'; end if;
+  end if;
+
+  insert into public.expenses(
+   organization_id,location_id,category,description,amount,payment_method,reference,recorded_by,notes,till_session_id,bank_account_id
+  ) values(
+   v_org,v_vehicle.location_id,'Fuel','Fuel - '||v_vehicle.registration_number,v_total,v_method,
+   nullif(trim(p_reference),''),auth.uid(),p_notes,v_till_id,p_bank_account_id
+  ) returning id into v_expense_id;
+
+  if v_method='cash' then
+   insert into public.payments(organization_id,location_id,direction,payment_type,method,amount,reference,notes,received_by,till_session_id)
+   values(v_org,v_vehicle.location_id,'out','fuel','cash',v_total,nullif(trim(p_reference),''),v_vehicle.registration_number,auth.uid(),v_till_id);
+  else
+   insert into public.banking_transactions(source_expense_id,organization_id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by)
+   values(v_expense_id,v_org,v_vehicle.location_id,p_bank_account_id,'withdrawal',v_total,'confirmed',nullif(trim(p_reference),''),'Fuel - '||v_vehicle.registration_number,auth.uid());
+  end if;
+ end if;
+
+ insert into public.fuel_logs(
+  organization_id,vehicle_id,location_id,driver_user_id,log_date,odometer,quantity,unit_cost,total_cost,
+  supplier,reference,expense_id,notes,recorded_by
+ ) values(
+  v_org,v_vehicle.id,v_vehicle.location_id,v_vehicle.assigned_driver_id,current_date,p_odometer,p_quantity,p_unit_cost,v_total,
+  nullif(trim(p_supplier),''),nullif(trim(p_reference),''),v_expense_id,p_notes,auth.uid()
+ ) returning id into v_id;
+
+ update public.vehicles set odometer=p_odometer,updated_at=now() where id=v_vehicle.id;
+ return jsonb_build_object('fuel_log_id',v_id,'total_cost',v_total,'expense_id',v_expense_id);
+end; $function$;
+
+
+CREATE OR REPLACE FUNCTION public.record_project_invoice_payment(p_invoice_id uuid, p_amount numeric, p_method text DEFAULT 'cash'::text, p_bank_account_id uuid DEFAULT NULL::uuid, p_reference text DEFAULT NULL::text, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_payment_id uuid;
+ v_org uuid:=public.current_organization_id();
+ v_invoice public.project_invoices%rowtype;
+ v_project public.projects%rowtype;
+ v_method text:=coalesce(nullif(trim(p_method),''),'cash');
+ v_till_id uuid;
+ v_new_paid numeric(18,2);
+ v_status text;
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not (
+  public.has_permission('projects.billing')
+  or public.has_permission('projects.manage')
+  or public.has_permission('finance.manage')
+ ) then raise exception 'Permission denied: projects.billing'; end if;
+ if coalesce(p_amount,0)<=0 then raise exception 'Payment amount must be greater than zero'; end if;
+
+ select * into v_invoice from public.project_invoices
+ where id=p_invoice_id and organization_id=v_org and status in ('issued','partial') for update;
+ if not found then raise exception 'Open project invoice not found'; end if;
+ select * into v_project from public.projects where id=v_invoice.project_id and organization_id=v_org;
+ if not found then raise exception 'Project not found'; end if;
+ if v_invoice.amount_paid+p_amount>v_invoice.total_amount+0.009 then raise exception 'Payment exceeds invoice balance'; end if;
+
+ if v_method='cash' then
+  select id into v_till_id from public.till_sessions
+  where organization_id=v_org and location_id=v_invoice.location_id and user_id=auth.uid() and status='open'
+  order by opened_at desc limit 1 for update;
+  if v_till_id is null then raise exception 'Open your till before accepting a cash project payment'; end if;
+ else
+  if p_bank_account_id is null then raise exception 'Choose the financial account receiving this payment'; end if;
+  if not exists(select 1 from public.bank_accounts where id=p_bank_account_id and organization_id=v_org and active=true) then raise exception 'Financial account not found'; end if;
+ end if;
+
+ v_new_paid:=v_invoice.amount_paid+p_amount;
+ v_status:=case when v_new_paid>=v_invoice.total_amount-0.009 then 'paid' else 'partial' end;
+
+ insert into public.payments(
+  organization_id,location_id,customer_id,project_id,project_invoice_id,direction,payment_type,method,
+  amount,reference,notes,received_by,till_session_id
+ ) values(
+  v_org,v_invoice.location_id,v_invoice.customer_id,v_invoice.project_id,v_invoice.id,'in','project_invoice',
+  v_method,p_amount,nullif(trim(p_reference),''),p_notes,auth.uid(),v_till_id
+ ) returning id into v_payment_id;
+
+ if v_method<>'cash' then
+  insert into public.banking_transactions(
+   source_payment_id,organization_id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by
+  ) values(
+   v_payment_id,v_org,v_invoice.location_id,p_bank_account_id,'deposit',p_amount,'confirmed',
+   nullif(trim(p_reference),''),'Project invoice '||v_invoice.invoice_number||' - '||v_project.project_number,auth.uid()
+  );
+ end if;
+
+ update public.project_invoices set amount_paid=v_new_paid,status=v_status,updated_at=now() where id=v_invoice.id;
+ perform public.recalculate_project_totals(v_invoice.project_id);
+
+ insert into public.project_events(organization_id,project_id,event_type,description,metadata,user_id)
+ values(v_org,v_invoice.project_id,'payment_received','Project invoice payment received',
+  jsonb_build_object('invoice_id',v_invoice.id,'invoice_number',v_invoice.invoice_number,'amount',p_amount,'method',v_method,'status',v_status),auth.uid());
+
+ return jsonb_build_object('invoice_id',v_invoice.id,'payment_status',v_status,'total_paid',v_new_paid,'balance',greatest(v_invoice.total_amount-v_new_paid,0));
+end; $function$;
+
+
+CREATE OR REPLACE FUNCTION public.pay_project_expense(p_project_expense_id uuid, p_payment_method text, p_bank_account_id uuid DEFAULT NULL::uuid, p_reference text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_row public.project_expenses%rowtype;
+ v_project public.projects%rowtype;
+ v_method text:=coalesce(nullif(trim(p_payment_method),''),'cash');
+ v_till_id uuid;
+ v_finance_expense_id uuid;
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not (public.has_permission('projects.costs') or public.has_permission('projects.manage')) then raise exception 'Permission denied: projects.costs'; end if;
+
+ select * into v_row from public.project_expenses
+ where id=p_project_expense_id and organization_id=v_org and status='accrued' for update;
+ if not found then raise exception 'Accrued project expense not found'; end if;
+ select * into v_project from public.projects where id=v_row.project_id and organization_id=v_org;
+ if not found then raise exception 'Project not found'; end if;
+
+ if v_method='cash' then
+  select id into v_till_id from public.till_sessions
+  where organization_id=v_org and location_id=v_row.location_id and user_id=auth.uid() and status='open'
+  order by opened_at desc limit 1 for update;
+  if v_till_id is null then raise exception 'Open your till before paying this expense in cash'; end if;
+ else
+  if p_bank_account_id is null then raise exception 'Choose the financial account used for this payment'; end if;
+  if not exists(select 1 from public.bank_accounts where id=p_bank_account_id and organization_id=v_org and active=true) then raise exception 'Financial account not found'; end if;
+ end if;
+
+ insert into public.expenses(
+  organization_id,location_id,project_id,category,description,amount,payment_method,reference,recorded_by,notes,till_session_id,bank_account_id
+ ) values(
+  v_org,v_row.location_id,v_row.project_id,v_row.category,v_row.description,v_row.amount,v_method,
+  nullif(trim(p_reference),''),auth.uid(),v_row.notes,v_till_id,p_bank_account_id
+ ) returning id into v_finance_expense_id;
+
+ if v_method='cash' then
+  insert into public.payments(
+   organization_id,location_id,project_id,direction,payment_type,method,amount,reference,notes,received_by,till_session_id
+  ) values(
+   v_org,v_row.location_id,v_row.project_id,'out','project_expense','cash',v_row.amount,
+   nullif(trim(p_reference),''),v_row.description,auth.uid(),v_till_id
+  );
+ else
+  insert into public.banking_transactions(
+   source_expense_id,organization_id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by
+  ) values(
+   v_finance_expense_id,v_org,v_row.location_id,p_bank_account_id,'withdrawal',v_row.amount,'confirmed',
+   nullif(trim(p_reference),''),'Project expense - '||v_project.project_number||' - '||v_row.description,auth.uid()
+  );
+ end if;
+
+ update public.project_expenses
+ set status='paid',payment_method=v_method,reference=nullif(trim(p_reference),''),
+     bank_account_id=p_bank_account_id,finance_expense_id=v_finance_expense_id,paid_at=now()
+ where id=v_row.id;
+
+ return jsonb_build_object('project_expense_id',v_row.id,'status','paid','finance_expense_id',v_finance_expense_id);
+end; $function$;
+
+
+CREATE OR REPLACE FUNCTION public.post_project_expense(p_project_id uuid, p_category text, p_description text, p_amount numeric, p_payment_method text DEFAULT NULL::text, p_bank_account_id uuid DEFAULT NULL::uuid, p_reference text DEFAULT NULL::text, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ v_org uuid:=public.current_organization_id();
+ v_project public.projects%rowtype;
+ v_method text:=nullif(trim(p_payment_method),'');
+ v_till_id uuid;
+ v_finance_expense_id uuid;
+ v_project_expense_id uuid;
+ v_status text:='accrued';
+begin
+ if v_org is null then raise exception 'Active organization required'; end if;
+ if not (public.has_permission('projects.costs') or public.has_permission('projects.manage')) then raise exception 'Permission denied: projects.costs'; end if;
+ if coalesce(p_amount,0)<=0 then raise exception 'Expense amount must be greater than zero'; end if;
+ if coalesce(trim(p_description),'')='' then raise exception 'Expense description is required'; end if;
+
+ select * into v_project from public.projects where id=p_project_id and organization_id=v_org and status<>'cancelled';
+ if not found then raise exception 'Project not found'; end if;
+
+ if v_method is not null then
+  v_status:='paid';
+  if v_method='cash' then
+   select id into v_till_id from public.till_sessions
+   where organization_id=v_org and location_id=v_project.location_id and user_id=auth.uid() and status='open'
+   order by opened_at desc limit 1 for update;
+   if v_till_id is null then raise exception 'Open your till before paying a project expense in cash'; end if;
+  else
+   if p_bank_account_id is null then raise exception 'Choose the financial account used for this project expense'; end if;
+   if not exists(select 1 from public.bank_accounts where id=p_bank_account_id and organization_id=v_org and active=true) then raise exception 'Financial account not found'; end if;
+  end if;
+
+  insert into public.expenses(
+   organization_id,location_id,project_id,category,description,amount,payment_method,reference,recorded_by,notes,till_session_id,bank_account_id
+  ) values(
+   v_org,v_project.location_id,v_project.id,coalesce(nullif(trim(p_category),''),'Project'),trim(p_description),
+   p_amount,v_method,nullif(trim(p_reference),''),auth.uid(),p_notes,v_till_id,p_bank_account_id
+  ) returning id into v_finance_expense_id;
+
+  if v_method='cash' then
+   insert into public.payments(
+    organization_id,location_id,project_id,direction,payment_type,method,amount,reference,notes,received_by,till_session_id
+   ) values(
+    v_org,v_project.location_id,v_project.id,'out','project_expense','cash',p_amount,
+    nullif(trim(p_reference),''),coalesce(p_notes,p_description),auth.uid(),v_till_id
+   );
+  else
+   insert into public.banking_transactions(
+    source_expense_id,organization_id,location_id,bank_account_id,transaction_type,amount,status,reference,notes,recorded_by
+   ) values(
+    v_finance_expense_id,v_org,v_project.location_id,p_bank_account_id,'withdrawal',p_amount,'confirmed',
+    nullif(trim(p_reference),''),'Project expense - '||v_project.project_number||' - '||trim(p_description),auth.uid()
+   );
+  end if;
+ end if;
+
+ insert into public.project_expenses(
+  organization_id,project_id,location_id,category,description,amount,status,payment_method,reference,
+  bank_account_id,finance_expense_id,notes,recorded_by,paid_at
+ ) values(
+  v_org,v_project.id,v_project.location_id,coalesce(nullif(trim(p_category),''),'Project'),trim(p_description),
+  p_amount,v_status,v_method,nullif(trim(p_reference),''),p_bank_account_id,v_finance_expense_id,p_notes,auth.uid(),
+  case when v_status='paid' then now() else null end
+ ) returning id into v_project_expense_id;
+
+ perform public.recalculate_project_totals(v_project.id);
+
+ insert into public.project_events(organization_id,project_id,event_type,description,metadata,user_id)
+ values(v_org,v_project.id,'expense_recorded',trim(p_description),
+  jsonb_build_object('project_expense_id',v_project_expense_id,'amount',p_amount,'status',v_status,'payment_method',v_method),auth.uid());
+
+ return jsonb_build_object('project_expense_id',v_project_expense_id,'status',v_status,'finance_expense_id',v_finance_expense_id);
+end; $function$;
+
+
 
 -- Fail migration if any named endpoint is missing or its body format changes.
 do $migration$ declare r record; f record; d text; patched text; begin
@@ -1208,19 +1685,26 @@ do $migration$ declare r record; f record; d text; patched text; begin
  perform public.mgt_require_scope((select location_id from public.production_orders where id=p_production_order_id and organization_id=public.current_organization_id()),(select created_by from public.production_orders where id=p_production_order_id and organization_id=public.current_organization_id()),false);$gate$),
 ('post_expense',$gate$perform public.mgt_require_modules(array['finance' ]);
  perform public.mgt_require_scope(p_location_id,auth.uid());$gate$),
-('record_bank_transaction',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
-('bank_cash_from_till',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
-('post_manual_journal',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
-('create_accounting_account',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
+('record_bank_transaction',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope(p_location_id,null);$gate$),
+('bank_cash_from_till',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope((select location_id from public.till_sessions where id=p_till_session_id and organization_id=public.current_organization_id()),(select user_id from public.till_sessions where id=p_till_session_id and organization_id=public.current_organization_id()),false);$gate$),
+('post_manual_journal',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope(p_location_id,null);$gate$),
+('create_accounting_account',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope(null,null);$gate$),
 ('create_accounting_period',$gate$perform public.mgt_require_modules(array['finance' ]);
  perform public.mgt_require_scope(null,null);$gate$),
 ('close_accounting_period',$gate$perform public.mgt_require_modules(array['finance' ]);
  perform public.mgt_require_scope(null,null);$gate$),
 ('reopen_accounting_period',$gate$perform public.mgt_require_modules(array['finance' ]);
  perform public.mgt_require_scope(null,null);$gate$),
-('reverse_accounting_journal',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
-('save_accounting_tax_code',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
-('save_accounting_tax_settings',$gate$perform public.mgt_require_modules(array['finance' ]);$gate$),
+('reverse_accounting_journal',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope((select location_id from public.accounting_journals where id=p_journal_id and organization_id=public.current_organization_id()),(select created_by from public.accounting_journals where id=p_journal_id and organization_id=public.current_organization_id()),false);$gate$),
+('save_accounting_tax_code',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope(null,null);$gate$),
+('save_accounting_tax_settings',$gate$perform public.mgt_require_modules(array['finance' ]);
+ perform public.mgt_require_scope(null,null);$gate$),
 ('clock_in',$gate$perform public.mgt_require_modules(array['hr' ]);
  perform public.mgt_require_scope(p_location_id,auth.uid());$gate$),
 ('clock_out',$gate$perform public.mgt_require_modules(array['hr' ]);$gate$),
@@ -1248,21 +1732,26 @@ do $migration$ declare r record; f record; d text; patched text; begin
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
 ('update_project_status',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
-('update_project_milestone',$gate$perform public.mgt_require_modules(array['projects' ]);$gate$),
+('update_project_milestone',$gate$perform public.mgt_require_modules(array['projects' ]);
+ perform public.mgt_require_scope((select p.location_id from public.projects p join public.project_milestones c on c.project_id=p.id where c.id=p_milestone_id and p.organization_id=public.current_organization_id()),(select p.manager_user_id from public.projects p join public.project_milestones c on c.project_id=p.id where c.id=p_milestone_id and p.organization_id=public.current_organization_id()),exists(select 1 from public.project_members m join public.project_milestones c on c.project_id=m.project_id where c.id=p_milestone_id and m.organization_id=public.current_organization_id() and m.user_id=auth.uid() and m.active));$gate$),
 ('update_project_task',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select p.location_id from public.projects p join public.project_tasks t on t.project_id=p.id where t.id=p_task_id and p.organization_id=public.current_organization_id()),(select assigned_user_id from public.project_tasks where id=p_task_id and organization_id=public.current_organization_id()));$gate$),
 ('log_project_time',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
-('review_project_timesheet',$gate$perform public.mgt_require_modules(array['projects' ]);$gate$),
+('review_project_timesheet',$gate$perform public.mgt_require_modules(array['projects' ]);
+ perform public.mgt_require_scope((select p.location_id from public.projects p join public.project_timesheets c on c.project_id=p.id where c.id=p_timesheet_id and p.organization_id=public.current_organization_id()),(select p.manager_user_id from public.projects p join public.project_timesheets c on c.project_id=p.id where c.id=p_timesheet_id and p.organization_id=public.current_organization_id()),exists(select 1 from public.project_members m join public.project_timesheets c on c.project_id=m.project_id where c.id=p_timesheet_id and m.organization_id=public.current_organization_id() and m.user_id=auth.uid() and m.active));$gate$),
 ('issue_project_material',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
-('reverse_project_material',$gate$perform public.mgt_require_modules(array['projects' ]);$gate$),
+('reverse_project_material',$gate$perform public.mgt_require_modules(array['projects' ]);
+ perform public.mgt_require_scope((select p.location_id from public.projects p join public.project_materials c on c.project_id=p.id where c.id=p_project_material_id and p.organization_id=public.current_organization_id()),(select p.manager_user_id from public.projects p join public.project_materials c on c.project_id=p.id where c.id=p_project_material_id and p.organization_id=public.current_organization_id()),exists(select 1 from public.project_members m join public.project_materials c on c.project_id=m.project_id where c.id=p_project_material_id and m.organization_id=public.current_organization_id() and m.user_id=auth.uid() and m.active));$gate$),
 ('post_project_expense',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
-('pay_project_expense',$gate$perform public.mgt_require_modules(array['projects' ]);$gate$),
+('pay_project_expense',$gate$perform public.mgt_require_modules(array['projects' ]);
+ perform public.mgt_require_scope((select p.location_id from public.projects p join public.project_expenses c on c.project_id=p.id where c.id=p_project_expense_id and p.organization_id=public.current_organization_id()),(select p.manager_user_id from public.projects p join public.project_expenses c on c.project_id=p.id where c.id=p_project_expense_id and p.organization_id=public.current_organization_id()),exists(select 1 from public.project_members m join public.project_expenses c on c.project_id=m.project_id where c.id=p_project_expense_id and m.organization_id=public.current_organization_id() and m.user_id=auth.uid() and m.active));$gate$),
 ('create_project_invoice',$gate$perform public.mgt_require_modules(array['projects' ]);
  perform public.mgt_require_scope((select location_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),(select manager_user_id from public.projects where id=p_project_id and organization_id=public.current_organization_id()),exists(select 1 from public.project_members where project_id=p_project_id and organization_id=public.current_organization_id() and user_id=auth.uid() and active));$gate$),
-('record_project_invoice_payment',$gate$perform public.mgt_require_modules(array['projects','finance' ]);$gate$),
+('record_project_invoice_payment',$gate$perform public.mgt_require_modules(array['projects','finance' ]);
+ perform public.mgt_require_scope((select location_id from public.project_invoices where id=p_invoice_id and organization_id=public.current_organization_id()),(select created_by from public.project_invoices where id=p_invoice_id and organization_id=public.current_organization_id()),false);$gate$),
 ('create_vehicle',$gate$perform public.mgt_require_modules(array['fleet' ]);
  perform public.mgt_require_scope(p_location_id,null);$gate$),
 ('create_delivery',$gate$perform public.mgt_require_modules(array['fleet' ]);
@@ -1275,12 +1764,13 @@ do $migration$ declare r record; f record; d text; patched text; begin
  perform public.mgt_require_scope(p_location_id,null);$gate$),
 ('schedule_asset_maintenance',$gate$perform public.mgt_require_modules(array['assets' ]);
  perform public.mgt_require_scope((select location_id from public.assets where id=p_asset_id and organization_id=public.current_organization_id()),(select assigned_user_id from public.assets where id=p_asset_id and organization_id=public.current_organization_id()),false);$gate$),
-('complete_asset_maintenance',$gate$perform public.mgt_require_modules(array['assets' ]);$gate$),
+('complete_asset_maintenance',$gate$perform public.mgt_require_modules(array['assets' ]);
+ perform public.mgt_require_scope((select location_id from public.asset_maintenance where id=p_maintenance_id and organization_id=public.current_organization_id()),(select assigned_user_id from public.asset_maintenance where id=p_maintenance_id and organization_id=public.current_organization_id()),false);$gate$),
 ('create_quotation',$gate$perform public.mgt_require_modules(array['documents' ]);
  perform public.mgt_require_scope(p_location_id,auth.uid());$gate$),
 ('update_quotation_status',$gate$perform public.mgt_require_modules(array['documents' ]);
  perform public.mgt_require_scope((select location_id from public.quotations where id=p_quotation_id and organization_id=public.current_organization_id()),(select created_by from public.quotations where id=p_quotation_id and organization_id=public.current_organization_id()),false);$gate$),
-('review_approval_request',$gate$perform public.mgt_require_modules(array['alerts' ]);
+('review_approval_request',$gate$perform public.mgt_require_modules(array['alerts','purchasing','manufacturing','inventory' ]);
  perform public.mgt_require_scope((select location_id from public.approval_requests where id=p_request_id and organization_id=public.current_organization_id()),(select requested_by from public.approval_requests where id=p_request_id and organization_id=public.current_organization_id()),false);$gate$),
 ('transition_online_order',$gate$perform public.mgt_require_modules(array['ecommerce' ]);
  perform public.mgt_require_scope((select location_id from public.online_orders where id=p_order_id and organization_id=public.current_organization_id()),(select confirmed_by from public.online_orders where id=p_order_id and organization_id=public.current_organization_id()),false);$gate$),
@@ -1383,5 +1873,25 @@ begin
 end; $$;
 revoke all on function public.mgt_payment_target_access(text,uuid) from public,anon;
 grant execute on function public.mgt_payment_target_access(text,uuid) to authenticated;
+
+-- Supplier totals cover the full ledger, rather than a capped screen history.
+create or replace function public.get_supplier_payables()
+returns table(supplier_id uuid,balance_due numeric) language plpgsql stable security definer set search_path=public as $$
+declare v_org uuid:=public.current_organization_id();
+begin
+ perform public.mgt_require_modules(array['suppliers','purchasing','finance']);
+ if not (public.has_permission('suppliers.view') or public.has_permission('purchasing.view') or public.has_permission('finance.view')) then
+  raise exception 'Permission denied: supplier balances' using errcode='42501';
+ end if;
+ return query select s.id,
+  case when public.mgt_record_scope_allows(v_org,null,null) then greatest(s.opening_balance-s.opening_balance_paid,0) else 0 end
+  +coalesce(sum(greatest(p.total_amount-p.amount_paid,0)),0)
+ from public.suppliers s left join public.purchases p on p.supplier_id=s.id and p.organization_id=v_org
+  and public.mgt_record_scope_allows(v_org,p.location_id,p.created_by)
+  and p.approval_status in ('not_required','approved') and p.status not in ('draft','pending_approval','rejected','cancelled')
+ where s.organization_id=v_org and s.active group by s.id;
+end; $$;
+revoke all on function public.get_supplier_payables() from public,anon;
+grant execute on function public.get_supplier_payables() to authenticated;
 
 notify pgrst,'reload schema';

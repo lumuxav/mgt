@@ -24,6 +24,7 @@ declare
  product uuid:=gen_random_uuid(); customer uuid:=gen_random_uuid(); request_id uuid:=gen_random_uuid();
  result jsonb; retry jsonb; sale uuid; other_sale uuid; job uuid; line uuid; project uuid; project2 uuid; payroll uuid;
  vehicle uuid; delivery uuid; delivery2 uuid; pending_delivery uuid; qty numeric; n integer; r record; args text;
+ supplier uuid:=gen_random_uuid(); purchase_a uuid:=gen_random_uuid(); purchase_b uuid:=gen_random_uuid(); approval uuid; task_id uuid;
  items jsonb; tender jsonb; count_before bigint;
 begin
  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
@@ -74,6 +75,31 @@ begin
  perform pg_temp.reject('Non-finite catalog prices are rejected',format('update public.products set selling_price=''NaN''::numeric where id=%L',product),'mgt_finite_numbers');
  perform pg_temp.reject('Non-finite stock quantities are rejected',format('update public.stock_balances set quantity=''NaN''::numeric where product_id=%L and location_id=%L',product,loc),'mgt_finite_numbers');
 
+ insert into public.suppliers(id,organization_id,name,opening_balance) values(supplier,org,'Scoped supplier',50);
+ insert into public.purchases(id,organization_id,location_id,supplier_id,purchase_number,total_amount,created_by,status)
+ values(purchase_a,org,loc,supplier,'AUDIT-P-A',20,owner_id,'ordered'),(purchase_b,org,second_loc,supplier,'AUDIT-P-B',20,owner_id,'ordered');
+ insert into public.purchases(organization_id,location_id,supplier_id,purchase_number,total_amount,created_by,status,approval_status)
+ values(org,loc,supplier,'AUDIT-UNAPPROVED',500,owner_id,'pending_approval','pending');
+ update public.user_work_scope set scope='location',location_id=loc where organization_id=org and user_id=owner_id;
+ perform public.record_supplier_payment(supplier,loc,20,'bank');
+ perform pg_temp.check_true('Supplier payment pays accessible purchase',(select amount_paid=20 from public.purchases where id=purchase_a));
+ perform pg_temp.check_true('Supplier payment cannot pay other branch purchase',(select amount_paid=0 from public.purchases where id=purchase_b));
+ perform pg_temp.check_true('Scoped supplier payment leaves organization opening balance alone',(select opening_balance_paid=0 from public.suppliers where id=supplier));
+ perform pg_temp.check_true('Supplier payable excludes inaccessible and unapproved debt',(select balance_due=0 from public.get_supplier_payables() where supplier_id=supplier));
+ perform pg_temp.reject('Supplier payment cannot bypass purchase approval',format('select public.record_supplier_payment(%L,%L,1,''bank'')',supplier,loc),'exceeds supplier outstanding balance');
+ update public.user_work_scope set scope='organization',location_id=null where organization_id=org and user_id=owner_id;
+
+ insert into public.approval_requests(organization_id,location_id,request_type,entity_type,entity_id,title,requested_by,metadata)
+ values(org,loc,'stock_adjustment','product',product::text,'Reservation recheck',owner_id,jsonb_build_object('product_id',product,'quantity_delta',-2,'reason','adjustment')) returning id into approval;
+ update public.stock_balances set reserved_quantity=quantity-1 where product_id=product and location_id=loc;
+ perform pg_temp.reject('Approval rechecks stock reservations',format('select public.review_approval_request(%L,''approved'')',approval),'reserved stock');
+ perform pg_temp.check_true('Failed approval stays pending',(select status='pending' from public.approval_requests where id=approval));
+ update public.stock_balances set reserved_quantity=0 where product_id=product and location_id=loc;
+ update public.organization_modules set enabled=false where organization_id=org and module_key='alerts';
+ perform public.review_approval_request(approval,'approved');
+ perform pg_temp.check_true('Inventory approval works without optional alerts module',(select status='approved' from public.approval_requests where id=approval));
+ update public.organization_modules set enabled=true where organization_id=org and module_key='alerts';
+
  result:=public.create_service_work_order(loc,customer,'Cancellation stock regression'); job:=(result->>'work_order_id')::uuid;
  result:=public.add_work_order_line(job,'material',product,'Material',1,10,4); line:=(result->>'line_id')::uuid;
  perform pg_temp.reject('Job cancellation cannot strand issued materials',format('select public.set_work_order_status(%L,''cancelled'')',job),'Reverse job materials');
@@ -84,6 +110,13 @@ begin
  result:=public.create_project(loc,customer,'Time budget one'); project:=(result->>'project_id')::uuid;
  result:=public.create_project(loc,customer,'Time budget two'); project2:=(result->>'project_id')::uuid;
  perform public.assign_project_member(project,worker); perform public.assign_project_member(project2,worker);
+ insert into public.project_tasks(organization_id,project_id,title,assigned_user_id) values(org,project2,'Outside branch task',worker) returning id into task_id;
+ update public.projects set location_id=second_loc where id=project2;
+ update public.user_work_scope set scope='location',location_id=loc where organization_id=org and user_id=worker;
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',worker,'role','authenticated')::text,true);
+ perform pg_temp.check_true('Work feed respects project branch scope',not exists(select 1 from jsonb_array_elements(public.mgt_my_work()->'tasks') t where t->>'id'=task_id::text));
+ perform pg_temp.reject('Task update respects project branch scope',format('select public.update_project_task(%L,''in_progress'',10)',task_id),'outside your assigned work scope');
+ update public.user_work_scope set scope='assigned',location_id=null where organization_id=org and user_id=worker;
  perform set_config('request.jwt.claims',jsonb_build_object('sub',worker,'role','authenticated')::text,true);
  perform public.log_project_time(project,null,current_date,16,'Permitted work');
  perform pg_temp.reject('Daily time limit applies across projects',format('select public.log_project_time(%L,null,current_date,9,''Impossible extra hours'')',project2),'cannot exceed 24 hours');

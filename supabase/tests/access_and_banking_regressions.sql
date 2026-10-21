@@ -44,6 +44,9 @@ begin
  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
  insert into auth.users(id,email) values(actor,actor::text||'@audit.invalid'),(member,member::text||'@audit.invalid');
  insert into public.organizations(id,name) values(org,'Universal integrity regression'),(other_org,'Universal isolation fixture');
+ insert into public.organization_modules(organization_id,module_key,enabled)
+ select org,key,true from unnest(array['pos','sales','inventory','services','finance','purchasing','ecommerce','payments','alerts']) key
+ on conflict(organization_id,module_key) do update set enabled=true;
  insert into public.locations(id,organization_id,name) values(loc,org,'Audit location'),(foreign_loc,other_org,'Other location');
  insert into public.users(id,organization_id,full_name,role,default_location_id) values(actor,org,'Audit owner','owner',loc);
  insert into public.categories(id,organization_id,name) values(cat,other_org,'Foreign category');

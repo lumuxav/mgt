@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { purchasePayable } from '../../lib/balances'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 const blankLine = () => ({ product_id: '', quantity: '1', unit_cost: '' })
@@ -17,6 +18,7 @@ export default function PurchasingPage() {
   const [suppliers, setSuppliers] = useState([])
   const [locations, setLocations] = useState([])
   const [purchases, setPurchases] = useState([])
+  const [payables, setPayables] = useState({})
   const [purchaseItems, setPurchaseItems] = useState([])
   const [tab, setTab] = useState('orders')
   const [message, setMessage] = useState(null)
@@ -47,22 +49,24 @@ export default function PurchasingPage() {
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
 
-      const [permRes, productRes, supplierRes, locationRes, purchaseRes, itemRes] = await Promise.all([
+      const [permRes, productRes, supplierRes, locationRes, purchaseRes, itemRes, balanceRes] = await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('products').select('id,name,sku,cost_price,track_inventory,unit').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('suppliers').select('id,name,phone,email,opening_balance,opening_balance_paid').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true).order('name'),
-        supabase.from('purchases').select('id,purchase_number,location_id,supplier_id,status,payment_status,total_amount,amount_paid,due_date,supplier_invoice_number,ordered_at,received_at,created_at,notes,suppliers(name),locations(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(300),
+        supabase.from('purchases').select('id,purchase_number,location_id,supplier_id,status,approval_status,payment_status,total_amount,amount_paid,due_date,supplier_invoice_number,ordered_at,received_at,created_at,notes,suppliers(name),locations(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(300),
         supabase.from('purchase_items').select('id,purchase_id,product_id,description,quantity,received_quantity,unit_cost,line_total,products(name,sku,unit)').order('id'),
+        supabase.rpc('get_supplier_payables'),
       ])
 
-      for (const result of [permRes, productRes, supplierRes, locationRes, purchaseRes, itemRes]) if (result.error) throw result.error
+      for (const result of [permRes, productRes, supplierRes, locationRes, purchaseRes, itemRes, balanceRes]) if (result.error) throw result.error
 
       setPermissions((permRes.data || []).map((row) => row.permission))
       setProducts(productRes.data || [])
       setSuppliers(supplierRes.data || [])
       setLocations(locationRes.data || [])
       setPurchases(purchaseRes.data || [])
+      setPayables(Object.fromEntries((balanceRes.data || []).map(row => [row.supplier_id,Number(row.balance_due || 0)])))
       const purchaseIds = new Set((purchaseRes.data || []).map((row) => row.id))
       setPurchaseItems((itemRes.data || []).filter((row) => purchaseIds.has(row.purchase_id)))
 
@@ -165,14 +169,11 @@ export default function PurchasingPage() {
     setBusy(false)
   }
 
-  const supplierBalances = useMemo(() => suppliers.map((supplier) => {
-    const purchaseDebt = purchases.filter((purchase) => purchase.supplier_id === supplier.id).reduce((sum, purchase) => sum + Math.max(0, Number(purchase.total_amount || 0) - Number(purchase.amount_paid || 0)), 0)
-    const openingDue = Math.max(0, Number(supplier.opening_balance || 0) - Number(supplier.opening_balance_paid || 0))
-    return { ...supplier, balance: openingDue + purchaseDebt }
-  }).sort((a,b) => b.balance - a.balance), [suppliers, purchases])
+  const supplierBalances = useMemo(() => suppliers.map(supplier => ({ ...supplier, balance: payables[supplier.id] || 0 }))
+    .sort((a,b) => b.balance - a.balance), [suppliers, payables])
 
   const openOrders = purchases.filter((purchase) => ['ordered','partial'].includes(purchase.status))
-  const overdue = purchases.filter((purchase) => purchase.due_date && purchase.payment_status !== 'paid' && new Date(purchase.due_date + 'T23:59:59') < new Date())
+  const overdue = purchases.filter((purchase) => purchase.due_date && purchasePayable(purchase)>0.009 && new Date(purchase.due_date + 'T23:59:59') < new Date())
   const outstanding = supplierBalances.reduce((sum, supplier) => sum + supplier.balance, 0)
 
   if (loading) return <main className="page-wrap text-muted">Loading purchasing...</main>
@@ -215,7 +216,7 @@ export default function PurchasingPage() {
             const items = purchaseItems.filter((item) => item.purchase_id === purchase.id)
             const orderedQty = items.reduce((sum,item) => sum + Number(item.quantity || 0),0)
             const receivedQty = items.reduce((sum,item) => sum + Number(item.received_quantity || 0),0)
-            const balance = Math.max(0, Number(purchase.total_amount || 0) - Number(purchase.amount_paid || 0))
+            const balance = purchasePayable(purchase)
             return (
               <article key={purchase.id} className="page-card p-4 sm:p-5">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

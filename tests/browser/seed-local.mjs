@@ -39,6 +39,13 @@ for(const role of [...roles,'foreign_owner']){
  },{onConflict:'id'}),'upsert local MGT profile '+role)
  accounts[role]={email,password,id:user.id,role:roleName}
 }
+const checkoutProduct=await checked(await admin.from('products').insert({
+ organization_id:company.id,name:'CI Checkout Retry Item',selling_price:1000,cost_price:400,
+ track_inventory:true,item_type:'product',active:true
+}).select('id').single(),'create checkout test product')
+await checked(await admin.from('stock_balances').insert({
+ product_id:checkoutProduct.id,location_id:office.id,quantity:10,reserved_quantity:0
+}),'seed checkout stock')
 const workOrder=await checked(await admin.from('work_orders').insert({
  organization_id:company.id,location_id:office.id,title:'CI Assigned Device Repair',
  assigned_to:accounts.technician.id,quoted_amount:90000
@@ -74,6 +81,7 @@ if(trial.error||!trial.data?.session?.access_token){
 await anonymous.auth.signOut()
 console.log('Local Supabase public-key owner password authentication verified')
 const data={accounts,orgId:company.id,officeId:office.id,otherOfficeId:otherOffice.id,
+ checkoutProductId:checkoutProduct.id,
  workOrderId:workOrder.id,deliveryId:delivery.id,failedDeliveryId:failedDelivery.id}
 await fs.writeFile('/tmp/mgt-e2e-fixtures.json',JSON.stringify(data))
 console.log('Prepared '+roles.length+' disposable staff logins, one external tenant, branch-scoped service work and an assigned delivery')
