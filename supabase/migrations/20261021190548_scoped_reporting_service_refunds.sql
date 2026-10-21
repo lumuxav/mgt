@@ -80,20 +80,59 @@ drop policy if exists mgt_report_scope on public.production_outputs;
 create policy mgt_report_scope on public.production_outputs as restrictive for all to authenticated using (exists(select 1 from public.production_orders parent where parent.id=production_outputs.production_order_id)) with check (exists(select 1 from public.production_orders parent where parent.id=production_outputs.production_order_id));
 
 
-drop policy if exists mgt_report_scope on public.project_timesheets;
-create policy mgt_report_scope on public.project_timesheets as restrictive for all to authenticated using (exists(select 1 from public.projects parent where parent.id=project_timesheets.project_id)) with check (exists(select 1 from public.projects parent where parent.id=project_timesheets.project_id));
-
-
-drop policy if exists mgt_report_scope on public.project_members;
-create policy mgt_report_scope on public.project_members as restrictive for all to authenticated using (exists(select 1 from public.projects parent where parent.id=project_members.project_id)) with check (exists(select 1 from public.projects parent where parent.id=project_members.project_id));
-
-
 drop policy if exists mgt_report_scope on public.online_order_items;
 create policy mgt_report_scope on public.online_order_items as restrictive for all to authenticated using (exists(select 1 from public.online_orders parent where parent.id=online_order_items.order_id)) with check (exists(select 1 from public.online_orders parent where parent.id=online_order_items.order_id));
 
 
 drop policy if exists mgt_report_scope on public.storefront_products;
 create policy mgt_report_scope on public.storefront_products as restrictive for all to authenticated using (exists(select 1 from public.storefronts parent where parent.id=storefront_products.storefront_id)) with check (exists(select 1 from public.storefronts parent where parent.id=storefront_products.storefront_id));
+
+
+-- Project policies inspect membership; use a narrowly scoped definer to avoid a policy cycle.
+create or replace function public.mgt_project_scope_allows(p_project uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+ select exists(select 1 from public.projects p where p.id=p_project
+  and p.organization_id=public.current_organization_id()
+  and public.mgt_record_scope_allows(p.organization_id,p.location_id,p.manager_user_id,exists(select 1 from public.project_members m where m.project_id=p.id and m.organization_id=p.organization_id and m.user_id=auth.uid() and m.active)))
+$$;
+revoke all on function public.mgt_project_scope_allows(uuid) from public,anon;
+grant execute on function public.mgt_project_scope_allows(uuid) to authenticated,service_role;
+
+
+drop policy if exists mgt_report_scope on public.projects;
+create policy mgt_report_scope on public.projects as restrictive for all to authenticated using (public.mgt_project_scope_allows(id)) with check (public.mgt_project_scope_allows(id));
+
+
+drop policy if exists mgt_report_scope on public.project_timesheets;
+create policy mgt_report_scope on public.project_timesheets as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_members;
+create policy mgt_report_scope on public.project_members as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_invoices;
+create policy mgt_report_scope on public.project_invoices as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_materials;
+create policy mgt_report_scope on public.project_materials as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_expenses;
+create policy mgt_report_scope on public.project_expenses as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_tasks;
+create policy mgt_report_scope on public.project_tasks as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_milestones;
+create policy mgt_report_scope on public.project_milestones as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
+
+
+drop policy if exists mgt_report_scope on public.project_events;
+create policy mgt_report_scope on public.project_events as restrictive for all to authenticated using (public.mgt_project_scope_allows(project_id)) with check (public.mgt_project_scope_allows(project_id));
 
 
 drop policy if exists mgt_report_scope on public.users;
