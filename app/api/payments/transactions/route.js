@@ -4,6 +4,7 @@ import { consumeServerRateLimit, verifyOrganizationPermission } from '../../../.
 import { normalizeUgandaPhone,requestProviderPayment } from '../../../../lib/serverPaymentProviders'
 import { resolveTarget } from '../../../../lib/paymentTargets'
 import { saveProviderStatus } from '../../../../lib/serverPaymentLifecycle'
+import { requirePaymentTargetAccess } from '../../../../lib/serverPaymentAccess'
 
 const sha=(value)=>crypto.createHash('sha256').update(value).digest('hex')
 const ref=()=>`MGT-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`
@@ -12,7 +13,7 @@ export async function GET(req){
   const check=await verifyOrganizationPermission(req,'payments.view','payments')
   if(check.error)return NextResponse.json({error:check.error},{status:check.status})
   try{
-    const {data,error}=await check.adminClient.from('external_payment_transactions')
+    const {data,error}=await check.scopedClient.from('external_payment_transactions')
       .select('id,connection_id,provider,transaction_type,target_type,target_id,location_id,customer_id,amount,currency,payer_phone,external_reference,provider_reference,provider_financial_id,status,settlement_status,provider_status,failure_reason,metadata,initiated_by,created_at,updated_at,completed_at,settled_at,settlement_result')
       .eq('organization_id',check.organizationId).order('created_at',{ascending:false}).limit(300)
     if(error)throw error
@@ -53,6 +54,7 @@ export async function POST(req){
     if(organizationError)throw organizationError
     if(String(connectionRow.currency).toUpperCase()!==String(organization.currency).toUpperCase())throw new Error('Payment provider currency must match the business currency.')
 
+    await requirePaymentTargetAccess(check,targetType,targetType==='customer_debt'?(body.customer_id||targetId):targetId)
     const target=await resolveTarget(adminClient,organizationId,targetType,targetId,body.customer_id||null,amount)
     const phone=normalizeUgandaPhone(body.payer_phone||target.phone||'')
     if(!/^256\d{9}$/.test(phone))throw new Error('Enter a valid Ugandan mobile-money number.')

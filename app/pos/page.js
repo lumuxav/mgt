@@ -8,6 +8,7 @@ import { getBusinessConfig } from '../../lib/platformConfig'
 import { useOnlineStatus } from '../../lib/useOnlineStatus'
 import { customerBalanceMap } from '../../lib/balances'
 import BarcodeScanner from '../components/BarcodeScanner'
+import { checkoutRequest, finishCheckout } from '../../lib/checkoutRequest'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 const blankPayment = () => ({ method: 'cash', amount: '', reference: '' })
@@ -15,6 +16,7 @@ const blankPayment = () => ({ method: 'cash', amount: '', reference: '' })
 export default function PosPage() {
   const business = getBusinessConfig()
   const searchRef = useRef(null)
+  const checkoutInFlight = useRef(false)
   const [context, setContext] = useState(null)
   const [permissions, setPermissions] = useState([])
   const [products, setProducts] = useState([])
@@ -279,6 +281,7 @@ export default function PosPage() {
   }
 
   const checkout = async () => {
+    if (checkoutInFlight.current) return
     if (!online) return setMessage({ type: 'error', text: 'You are offline. MGT will not post a sale until the connection is restored.' })
     if (!cart.length) return setMessage({ type: 'error', text: 'Add at least one product or service.' })
     if (!locationId) return setMessage({ type: 'error', text: 'Choose a location.' })
@@ -288,6 +291,7 @@ export default function PosPage() {
     if (balanceDue > 0.009 && !customerId) return setMessage({ type: 'error', text: 'Select a customer for partial or credit sales.' })
     if (paymentTotal > total + 0.009) return setMessage({ type: 'error', text: 'Payments cannot exceed the sale total.' })
 
+    checkoutInFlight.current = true
     setSaving(true)
     setMessage(null)
     try {
@@ -305,7 +309,7 @@ export default function PosPage() {
           reference: payment.reference || null,
         }))
 
-      const { data, error } = await supabase.rpc('post_pos_sale', {
+      const payload = {
         p_location_id: locationId,
         p_customer_id: customerId || null,
         p_items: payloadItems,
@@ -314,9 +318,13 @@ export default function PosPage() {
         p_channel: 'pos',
         p_pricing_mode: pricingMode,
         p_notes: notes || null,
-      })
+      }
+      const scope = `${context.organization.id}/${context.user.id}`
+      const requestId = await checkoutRequest(window.sessionStorage, window.crypto, scope, payload)
+      const { data, error } = await supabase.rpc('post_pos_sale_once', { p_request_id: requestId, ...payload })
       if (error) throw error
 
+      finishCheckout(window.sessionStorage, scope)
       setCompletedSale(data)
       setCart([])
       setPayments([blankPayment()])
@@ -328,6 +336,7 @@ export default function PosPage() {
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Sale could not be completed.' })
     } finally {
+      checkoutInFlight.current = false
       setSaving(false)
     }
   }
