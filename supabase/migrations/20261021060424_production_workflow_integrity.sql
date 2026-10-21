@@ -530,12 +530,12 @@ begin
  ) then raise exception 'Invalid delivery status transition'; end if;
  if p_status='delivered' and nullif(trim(p_recipient_name),'') is null then raise exception 'Recipient name is required as proof of delivery'; end if;
  if p_status='failed' and nullif(trim(p_failure_reason),'') is null then raise exception 'Reason for unsuccessful delivery is required'; end if;
+ if v_d.vehicle_id is not null then perform 1 from public.vehicles where id=v_d.vehicle_id and organization_id=v_org for update; end if;
  if p_status='dispatched' then
   if not exists(select 1 from public.users u where u.id=v_d.driver_user_id and u.organization_id=v_org and u.active and u.archived_at is null) then raise exception 'Assign an active driver before dispatch'; end if;
   if exists(select 1 from public.user_work_scope s where s.user_id=v_d.driver_user_id and s.organization_id=v_org and s.scope='location' and s.location_id is distinct from v_d.source_location_id) then raise exception 'Delivery is outside the assigned driver location'; end if;
   if v_d.vehicle_id is not null and not exists(select 1 from public.vehicles where id=v_d.vehicle_id and organization_id=v_org and active and status not in ('maintenance','out_of_service','retired')) then raise exception 'Vehicle is unavailable for dispatch'; end if;
  end if;
- if v_d.vehicle_id is not null then perform 1 from public.vehicles where id=v_d.vehicle_id and organization_id=v_org for update; end if;
  update public.deliveries set
   status=p_status,
   dispatched_at=case when p_status in ('dispatched','in_transit','delivered') then coalesce(dispatched_at,now()) else dispatched_at end,
@@ -547,7 +547,7 @@ begin
  where id=v_d.id;
 
  if v_d.vehicle_id is not null then
-  update public.vehicles set status=case when exists(select 1 from public.deliveries d where d.vehicle_id=v_d.vehicle_id and d.organization_id=v_org and d.status in ('dispatched','in_transit')) then 'in_transit' else 'available' end,updated_at=now()
+  update public.vehicles set status=case when vehicles.status in ('maintenance','out_of_service','retired') then vehicles.status when exists(select 1 from public.deliveries d where d.vehicle_id=v_d.vehicle_id and d.organization_id=v_org and d.status in ('dispatched','in_transit')) then 'in_transit' else 'available' end,updated_at=now()
   where id=v_d.vehicle_id and organization_id=v_org and status<>'maintenance';
  end if;
 
@@ -593,7 +593,7 @@ begin
     updated_at=now()
  where id=v_d.id and organization_id=v_org;
  if v_d.vehicle_id is not null then
-   update public.vehicles set status=case when exists(select 1 from public.deliveries d where d.vehicle_id=v_d.vehicle_id and d.organization_id=v_org and d.status in ('dispatched','in_transit')) then 'in_transit' else 'available' end,
+   update public.vehicles set status=case when vehicles.status in ('maintenance','out_of_service','retired') then vehicles.status when exists(select 1 from public.deliveries d where d.vehicle_id=v_d.vehicle_id and d.organization_id=v_org and d.status in ('dispatched','in_transit')) then 'in_transit' else 'available' end,
      updated_at=now() where id=v_d.vehicle_id and organization_id=v_org and status<>'maintenance';
  end if;
  insert into public.audit_log(organization_id,location_id,user_id,action,entity_type,entity_id,summary,metadata)

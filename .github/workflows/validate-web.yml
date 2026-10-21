@@ -112,7 +112,7 @@ jobs:
           PY
 
       - name: Lint new workforce modules
-        run: npx eslint app/my-work/page.js app/api/admin/staff-work-access/route.js lib/workspaceCatalog.js
+        run: npx eslint app/my-work/page.js app/api/admin/staff-work-access/route.js lib/workspaceCatalog.js app/pos/page.js lib/checkoutRequest.js lib/balances.js lib/serverAccess.js lib/serverPaymentAccess.js app/api/payments/transactions/route.js 'app/api/payments/transactions/[id]/route.js'
 
       - name: Run logic regression tests
         run: npm test

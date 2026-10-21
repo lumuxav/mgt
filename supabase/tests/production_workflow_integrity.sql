@@ -146,6 +146,11 @@ begin
  perform public.mgt_update_assigned_delivery(delivery2,'delivered','Second recipient');
  perform pg_temp.check_true('Vehicle becomes available after last delivery',(select status='available' from public.vehicles where id=vehicle));
  perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_id,'role','authenticated')::text,true);
+ result:=public.create_delivery(loc,'Maintenance test stop',p_vehicle_id=>vehicle,p_driver_user_id=>driver); pending_delivery:=(result->>'delivery_id')::uuid;
+ perform public.update_delivery_status(pending_delivery,'dispatched');
+ update public.vehicles set status='maintenance' where id=vehicle;
+ perform public.update_delivery_status(pending_delivery,'delivered','Maintenance recipient');
+ perform pg_temp.check_true('Delivery completion preserves vehicle maintenance status',(select status='maintenance' from public.vehicles where id=vehicle));
 
  -- Actually execute all gated workflows with disabled modules. No mutation is
  -- allowed to reach its old validation/transaction body.
