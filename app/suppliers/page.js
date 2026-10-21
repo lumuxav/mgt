@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { purchasePayable } from '../../lib/balances'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 const INITIAL = { name:'', phone:'', email:'', address:'', opening_balance:'', notes:'' }
@@ -15,6 +16,7 @@ export default function SuppliersPage() {
   const [permissions,setPermissions] = useState([])
   const [suppliers,setSuppliers] = useState([])
   const [purchases,setPurchases] = useState([])
+  const [balances,setBalances] = useState({})
   const [payments,setPayments] = useState([])
   const [locations,setLocations] = useState([])
   const [form,setForm] = useState(INITIAL)
@@ -40,19 +42,21 @@ export default function SuppliersPage() {
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
 
-      const [permRes,supplierRes,purchaseRes,paymentRes,locationRes] = await Promise.all([
+      const [permRes,supplierRes,purchaseRes,paymentRes,locationRes,balanceRes] = await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('suppliers').select('id,name,phone,email,address,opening_balance,opening_balance_paid,active,notes,created_at').eq('organization_id',org).eq('active',true).order('name'),
-        supabase.from('purchases').select('id,purchase_number,supplier_id,location_id,status,payment_status,total_amount,amount_paid,due_date,created_at,locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
+        supabase.from('purchases').select('id,purchase_number,supplier_id,location_id,status,approval_status,payment_status,total_amount,amount_paid,due_date,created_at,locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
         supabase.from('payments').select('id,supplier_id,purchase_id,direction,payment_type,method,amount,reference,notes,created_at,locations(name)').eq('organization_id',org).not('supplier_id','is',null).order('created_at',{ascending:false}).limit(500),
         supabase.from('locations').select('id,name').eq('organization_id',org).eq('active',true).order('name'),
+        supabase.rpc('get_supplier_payables'),
       ])
 
-      for (const result of [permRes,supplierRes,purchaseRes,paymentRes,locationRes]) if (result.error) throw result.error
+      for (const result of [permRes,supplierRes,purchaseRes,paymentRes,locationRes,balanceRes]) if (result.error) throw result.error
 
       setPermissions((permRes.data || []).map((row) => row.permission))
       setSuppliers(supplierRes.data || [])
       setPurchases(purchaseRes.data || [])
+      setBalances(Object.fromEntries((balanceRes.data || []).map(row => [row.supplier_id,Number(row.balance_due || 0)])))
       setPayments(paymentRes.data || [])
       setLocations(locationRes.data || [])
       setLocationId((value) => value || ctx.location?.id || locationRes.data?.[0]?.id || '')
@@ -64,16 +68,6 @@ export default function SuppliersPage() {
   }
 
   useEffect(() => { load() }, [])
-
-  const balances = useMemo(() => {
-    const result = {}
-    for (const supplier of suppliers) {
-      const opening = Math.max(0, Number(supplier.opening_balance || 0) - Number(supplier.opening_balance_paid || 0))
-      const purchaseDebt = purchases.filter((purchase) => purchase.supplier_id === supplier.id).reduce((sum,purchase) => sum + Math.max(0,Number(purchase.total_amount || 0) - Number(purchase.amount_paid || 0)),0)
-      result[supplier.id] = opening + purchaseDebt
-    }
-    return result
-  },[suppliers,purchases])
 
   const totalPayable = Object.values(balances).reduce((sum,value) => sum + Number(value || 0),0)
 
@@ -208,7 +202,7 @@ export default function SuppliersPage() {
                   <div className="max-h-72 divide-y divide-[var(--line)] overflow-y-auto">
                     {!selectedPurchases.length && <p className="p-5 text-sm text-muted">No purchases from this supplier.</p>}
                     {selectedPurchases.map((purchase)=>{
-                      const due = Math.max(0,Number(purchase.total_amount||0)-Number(purchase.amount_paid||0))
+                      const due = purchasePayable(purchase)
                       return <div key={purchase.id} className="flex justify-between gap-4 p-4"><div><strong>{purchase.purchase_number}</strong><p className="mt-1 text-xs text-muted">{purchase.status} · {purchase.locations?.name || 'Location'} · {new Date(purchase.created_at).toLocaleDateString()}</p></div><div className="text-right"><strong>{money(purchase.total_amount,currency)}</strong>{due>0.009&&<p className="mt-1 text-xs font-black text-red-500">Due {money(due,currency)}</p>}</div></div>
                     })}
                   </div>

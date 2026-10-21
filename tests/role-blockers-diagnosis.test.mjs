@@ -33,5 +33,5 @@ test('existing transaction and assignment security remain in charge',()=>{
   assert.match(workspace,/supabase\.rpc\('mgt_update_assigned_delivery'/)
   assert.match(workspace,/supabase\.rpc\('mgt_my_work'/)
   const pos=read('app/pos/page.js')
-  assert.match(pos,/supabase\.rpc\('post_pos_sale'/)
+  assert.match(pos,/supabase\.rpc\('post_pos_sale_once'/)
 })

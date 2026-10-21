@@ -24,6 +24,9 @@ begin
  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
  insert into auth.users(id,email) values(actor,actor::text||'@audit.invalid'),(member,member::text||'@audit.invalid');
  insert into public.organizations(id,name) values(org,'Universal transactional audit'),(other_org,'Universal isolation audit');
+ insert into public.organization_modules(organization_id,module_key,enabled)
+ select org,key,true from unnest(array['pos','sales','inventory','services','finance','purchasing','ecommerce','payments','alerts']) key
+ on conflict(organization_id,module_key) do update set enabled=true;
  insert into public.locations(id,organization_id,name) values(loc,org,'Audit location'),(other_loc,other_org,'Other location');
  insert into public.users(id,organization_id,full_name,role,default_location_id) values(actor,org,'Audit owner','owner',loc);
  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);

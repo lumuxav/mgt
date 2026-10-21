@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
+import { createClient } from '@supabase/supabase-js'
 
 const base='http://127.0.0.1:3000'
 const fixture=JSON.parse(await fs.readFile('/tmp/mgt-e2e-fixtures.json','utf8'))
+if(process.env.NEXT_PUBLIC_SUPABASE_URL!=='http://127.0.0.1:54321')throw Error('Browser writes require disposable localhost Supabase')
+const admin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}})
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
 const roles=['owner','admin','manager','branch_manager','cashier','salesperson','storekeeper',
  'procurement_officer','accountant','hr_officer','production_staff','technician',
@@ -89,6 +92,39 @@ try{
  }
  // The two operative workflows must change live data through real browser clicks.
  for(const [role,flow] of [
+  ['cashier',async(page)=>{
+   await page.goto(base+'/pos',{waitUntil:'domcontentloaded',timeout:deadline})
+   await page.getByRole('button',{name:/CI Checkout Retry Item/}).waitFor({state:'visible',timeout:deadline})
+   await page.getByPlaceholder('Opening cash').fill('0')
+   await page.getByRole('button',{name:'Open',exact:true}).click()
+   await page.getByPlaceholder('Counted cash').waitFor({state:'visible',timeout:deadline})
+   await page.getByRole('button',{name:/CI Checkout Retry Item/}).click()
+   await page.getByRole('button',{name:'Set full payment',exact:true}).click()
+   const requests=[]
+   await page.route('**/rest/v1/rpc/post_pos_sale_once',async route=>{
+    requests.push(route.request().postDataJSON())
+    const response=await route.fetch()
+    check(response.ok(),'checkout request reached the database successfully')
+    if(requests.length===1)await route.abort('failed') // Commit succeeds; browser loses the reply.
+    else await route.fulfill({response})
+   })
+   await page.getByRole('button',{name:'Complete sale',exact:true}).click()
+   await page.getByText(/Failed to fetch|NetworkError|fetch failed/i).first().waitFor({state:'visible',timeout:deadline})
+   // Two clicks in the same event turn must still submit one retry.
+   await page.getByRole('button',{name:'Complete sale',exact:true}).evaluate(button=>{button.click();button.click()})
+   await page.getByText(/Sale .* completed successfully/).waitFor({state:'visible',timeout:deadline})
+   check(requests.length===2,'double click submits only one retry')
+   check(requests[0].p_request_id===requests[1].p_request_id,'lost response retry preserves request ID')
+   const stock=await admin.from('stock_balances').select('quantity').eq('product_id',fixture.checkoutProductId).eq('location_id',fixture.officeId).single()
+   if(stock.error)throw stock.error
+   check(Number(stock.data.quantity)===9,'real browser checkout deducted stock once')
+   const sales=await admin.from('sales').select('id,amount_paid').eq('organization_id',fixture.orgId).eq('sold_by',fixture.accounts.cashier.id)
+   if(sales.error)throw sales.error
+   check(sales.data.length===1&&Number(sales.data[0].amount_paid)===1000,'real browser checkout created one paid sale')
+   const payments=await admin.from('payments').select('id').eq('sale_id',sales.data[0].id)
+   if(payments.error)throw payments.error
+   check(payments.data.length===1,'lost response did not record a second cash receipt')
+  }],
   ['technician',async(page)=>{
    await ready(page,'/my-work','My Work')
    await page.getByText('CI Assigned Device Repair').waitFor({state:'visible',timeout:deadline})

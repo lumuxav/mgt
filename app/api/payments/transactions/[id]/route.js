@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifyOrganizationPermission } from '../../../../../lib/serverAccess'
 import { checkProviderPayment } from '../../../../../lib/serverPaymentProviders'
 import { markSettlementFailure, saveProviderStatus } from '../../../../../lib/serverPaymentLifecycle'
+import { requirePaymentTargetAccess } from '../../../../../lib/serverPaymentAccess'
 
 async function refreshTransaction(adminClient,organizationId,transaction){
   const {data:connection,error:connectionError}=await adminClient.rpc('server_get_payment_provider_connection',{
@@ -50,6 +51,7 @@ export async function POST(req,{params}){
       .select('*').eq('organization_id',check.organizationId).eq('id',id).maybeSingle()
     if(error)throw error
     if(!transaction)return NextResponse.json({error:'Payment transaction not found.'},{status:404})
+    await requirePaymentTargetAccess(check,transaction.target_type,transaction.target_type==='customer_debt'?(transaction.customer_id||transaction.target_id):transaction.target_id)
     const own=transaction.initiated_by===check.caller.id
     if(!own){
       const permission=await verifyOrganizationPermission(req,'payments.manage','payments')
@@ -70,6 +72,7 @@ export async function PATCH(req,{params}){
       .select('*').eq('organization_id',check.organizationId).eq('id',id).maybeSingle()
     if(error)throw error
     if(!transaction)return NextResponse.json({error:'Payment transaction not found.'},{status:404})
+    await requirePaymentTargetAccess(check,transaction.target_type,transaction.target_type==='customer_debt'?(transaction.customer_id||transaction.target_id):transaction.target_id)
     if(transaction.status!=='succeeded')throw new Error('Only successful provider payments can be settled.')
     const {data:settlement,error:settlementError}=await check.adminClient.rpc('server_settle_external_payment',{p_transaction_id:id})
     if(settlementError)throw settlementError

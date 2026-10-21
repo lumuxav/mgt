@@ -98,7 +98,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: build-validation-placeholder
         run: npm run build
 
-      - name: Check modular workforce SQL grammar
+      - name: Check every migration SQL grammar
         shell: bash
         run: |
           set -euo pipefail
@@ -106,13 +106,13 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from pglast import parse_sql
-          path = Path("supabase/migrations/20261018_0045_modular_staff_workspaces.sql")
-          parse_sql(path.read_text())
-          print(f"PostgreSQL SQL grammar validated: {path}")
+          for path in sorted(Path("supabase/migrations").glob("*.sql")):
+              parse_sql(path.read_text())
+              print(f"PostgreSQL SQL grammar validated: {path}")
           PY
 
       - name: Lint new workforce modules
-        run: npx eslint app/my-work/page.js app/api/admin/staff-work-access/route.js lib/workspaceCatalog.js
+        run: npx eslint app/my-work/page.js app/api/admin/staff-work-access/route.js lib/workspaceCatalog.js app/pos/page.js lib/checkoutRequest.js lib/balances.js lib/serverAccess.js lib/serverPaymentAccess.js app/api/payments/transactions/route.js 'app/api/payments/transactions/[id]/route.js'
 
       - name: Run logic regression tests
         run: npm test
