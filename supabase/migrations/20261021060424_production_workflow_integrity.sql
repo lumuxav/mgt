@@ -216,7 +216,9 @@ begin
 
  perform pg_advisory_xact_lock(hashtextextended('mgt-time:'||v_user::text||':'||coalesce(p_work_date,current_date)::text,0));
  if not exists(select 1 from public.users where id=v_user and organization_id=v_org and active and archived_at is null) then raise exception 'Active employee required'; end if;
- perform 1 from public.projects where id=p_project_id and organization_id=v_org and status not in ('completed','cancelled') for share;
+ -- Totals are updated later in this transaction. Take the update lock now,
+ -- avoiding two workers deadlocking while upgrading shared project locks.
+ perform 1 from public.projects where id=p_project_id and organization_id=v_org and status not in ('completed','cancelled') for update;
  if not found then raise exception 'Project is closed or unavailable for new time entries'; end if;
  if coalesce((select sum(hours) from public.project_timesheets where organization_id=v_org and user_id=v_user and work_date=coalesce(p_work_date,current_date) and status<>'rejected'),0)+p_hours>24 then
   raise exception 'Daily time entries cannot exceed 24 hours across projects';
