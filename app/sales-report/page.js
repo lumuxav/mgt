@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { reportRows } from '../../lib/reportRows'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { returnsAsOf, refundedBySale } from '../../lib/salesReporting'
@@ -69,34 +70,34 @@ export default function ReportsPage(){
           balanceRes,movementRes,jobRes,assignmentRes,productionRes,payrollRes,assetRes,maintenanceRes,vehicleRes,fuelRes,deliveryRes,
           projectRes,invoiceRes,materialRes,timesheetRes,projectExpenseRes
         ]=await Promise.all([
-          supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
-          supabase.from('users').select('id,full_name,role,default_location_id,active').eq('organization_id',org).eq('active',true),
-          supabase.rpc('get_scoped_customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
-          supabase.rpc('get_scoped_suppliers').select('id,name,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),
-          supabase.from('products').select('id,name,sku,cost_price,selling_price,reorder_level,track_inventory,active').eq('organization_id',org).eq('active',true),
-          supabase.from('sales').select('id,sale_number,location_id,customer_id,sold_by,total_amount,amount_paid,refunded_amount,status,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(8000),
-          supabase.from('sale_items').select('id,sale_id,product_id,description,quantity,unit_price,unit_cost,discount_amount,tax_amount,line_total').limit(25000),
-          supabase.from('sale_returns').select('id,sale_id,total_amount,created_at').eq('organization_id',org).limit(6000),
-          supabase.from('sale_return_items').select('return_id,sale_item_id,product_id,quantity,unit_refund,line_total').limit(15000),
-          supabase.from('expenses').select('id,location_id,category,description,amount,payment_method,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),
-          supabase.from('payments').select('id,location_id,direction,payment_type,method,amount,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(12000),
-          supabase.from('purchases').select('id,location_id,supplier_id,purchase_number,total_amount,amount_paid,status,payment_status,created_at,received_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),
-          supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,updated_at,products(organization_id)').limit(15000),
-          supabase.from('stock_movements').select('id,location_id,product_id,movement_type,quantity,unit_cost,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(25000),
-          supabase.from('work_orders').select('id,job_number,title,location_id,customer_id,status,final_amount,amount_paid,final_cost,gross_profit,completed_at,due_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),
-          supabase.from('work_order_assignments').select('work_order_id,user_id,assigned_at').limit(12000),
-          supabase.from('production_orders').select('id,production_number,location_id,planned_quantity,actual_quantity,waste_quantity,status,total_material_cost,unit_cost,output_variance,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),
-          supabase.from('payroll_entries').select('id,user_id,location_id,gross_pay,net_pay,deductions,commissions,attendance_days,attendance_hours,payment_status,paid_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(9000),
-          supabase.from('assets').select('id,location_id,asset_number,name,category,status,purchase_cost,purchase_date,active').eq('organization_id',org).eq('active',true),
-          supabase.from('asset_maintenance').select('id,asset_id,location_id,maintenance_number,status,cost,downtime_hours,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),
-          supabase.from('vehicles').select('id,location_id,registration_number,make,model,odometer,status,active').eq('organization_id',org).eq('active',true),
-          supabase.from('fuel_logs').select('id,vehicle_id,location_id,log_date,odometer,quantity,total_cost').eq('organization_id',org).order('log_date',{ascending:false}).limit(9000),
-          supabase.from('deliveries').select('id,source_location_id,vehicle_id,driver_user_id,status,scheduled_at,dispatched_at,delivered_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),
-          supabase.from('projects').select('id,project_number,name,location_id,customer_id,manager_user_id,status,contract_value,budget_cost,total_cost,billed_amount,amount_paid,gross_profit,progress_percent,start_date,due_date,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(4000),
-          supabase.from('project_invoices').select('id,project_id,location_id,customer_id,invoice_number,total_amount,amount_paid,status,issue_date,due_date').eq('organization_id',org).limit(7000),
-          supabase.from('project_materials').select('id,project_id,location_id,product_id,description,quantity,unit_cost,cost_total,status,issued_at').eq('organization_id',org).limit(12000),
-          supabase.from('project_timesheets').select('id,project_id,user_id,work_date,hours,cost_amount,billable_amount,status').eq('organization_id',org).limit(14000),
-          supabase.from('project_expenses').select('id,project_id,location_id,expense_date,category,amount,status').eq('organization_id',org).limit(10000),
+          reportRows(supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),['id']),
+          reportRows(supabase.from('users').select('id,full_name,role,default_location_id,active').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.rpc('get_scoped_customers').select('id,name,customer_group,credit_limit,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.rpc('get_scoped_suppliers').select('id,name,opening_balance,opening_balance_paid').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.from('products').select('id,name,sku,cost_price,selling_price,reorder_level,track_inventory,active').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.from('sales').select('id,sale_number,location_id,customer_id,sold_by,total_amount,amount_paid,refunded_amount,status,payment_status,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(8000),['id']),
+          reportRows(supabase.from('sale_items').select('id,sale_id,product_id,description,quantity,unit_price,unit_cost,discount_amount,tax_amount,line_total').limit(25000),['id']),
+          reportRows(supabase.from('sale_returns').select('id,sale_id,total_amount,created_at').eq('organization_id',org).limit(6000),['id']),
+          reportRows(supabase.from('sale_return_items').select('return_id,sale_item_id,product_id,quantity,unit_refund,line_total').limit(15000),['id']),
+          reportRows(supabase.from('expenses').select('id,location_id,category,description,amount,payment_method,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),['id']),
+          reportRows(supabase.from('payments').select('id,location_id,direction,payment_type,method,amount,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(12000),['id']),
+          reportRows(supabase.from('purchases').select('id,location_id,supplier_id,purchase_number,total_amount,amount_paid,status,payment_status,created_at,received_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),['id']),
+          reportRows(supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,updated_at,products(organization_id)').limit(15000),['product_id','location_id']),
+          reportRows(supabase.from('stock_movements').select('id,location_id,product_id,movement_type,quantity,unit_cost,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(25000),['id']),
+          reportRows(supabase.from('work_orders').select('id,job_number,title,location_id,customer_id,status,final_amount,amount_paid,final_cost,gross_profit,completed_at,due_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),['id']),
+          reportRows(supabase.from('work_order_assignments').select('work_order_id,user_id,assigned_at').limit(12000),['work_order_id','user_id']),
+          reportRows(supabase.from('production_orders').select('id,production_number,location_id,planned_quantity,actual_quantity,waste_quantity,status,total_material_cost,unit_cost,output_variance,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(6000),['id']),
+          reportRows(supabase.from('payroll_entries').select('id,user_id,location_id,gross_pay,net_pay,deductions,commissions,attendance_days,attendance_hours,payment_status,paid_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(9000),['id']),
+          reportRows(supabase.from('assets').select('id,location_id,asset_number,name,category,status,purchase_cost,purchase_date,active').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.from('asset_maintenance').select('id,asset_id,location_id,maintenance_number,status,cost,downtime_hours,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),['id']),
+          reportRows(supabase.from('vehicles').select('id,location_id,registration_number,make,model,odometer,status,active').eq('organization_id',org).eq('active',true),['id']),
+          reportRows(supabase.from('fuel_logs').select('id,vehicle_id,location_id,log_date,odometer,quantity,total_cost').eq('organization_id',org).order('log_date',{ascending:false}).limit(9000),['id']),
+          reportRows(supabase.from('deliveries').select('id,source_location_id,vehicle_id,driver_user_id,status,scheduled_at,dispatched_at,delivered_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(7000),['id']),
+          reportRows(supabase.from('projects').select('id,project_number,name,location_id,customer_id,manager_user_id,status,contract_value,budget_cost,total_cost,billed_amount,amount_paid,gross_profit,progress_percent,start_date,due_date,completed_at,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(4000),['id']),
+          reportRows(supabase.from('project_invoices').select('id,project_id,location_id,customer_id,invoice_number,total_amount,amount_paid,status,issue_date,due_date').eq('organization_id',org).limit(7000),['id']),
+          reportRows(supabase.from('project_materials').select('id,project_id,location_id,product_id,description,quantity,unit_cost,cost_total,status,issued_at').eq('organization_id',org).limit(12000),['id']),
+          reportRows(supabase.from('project_timesheets').select('id,project_id,user_id,work_date,hours,cost_amount,billable_amount,status').eq('organization_id',org).limit(14000),['id']),
+          reportRows(supabase.from('project_expenses').select('id,project_id,location_id,expense_date,category,amount,status').eq('organization_id',org).limit(10000),['id']),
         ])
         const all=[locationRes,userRes,customerRes,supplierRes,productRes,salesRes,itemRes,returnRes,returnItemRes,expenseRes,paymentRes,purchaseRes,balanceRes,movementRes,jobRes,assignmentRes,productionRes,payrollRes,assetRes,maintenanceRes,vehicleRes,fuelRes,deliveryRes,projectRes,invoiceRes,materialRes,timesheetRes,projectExpenseRes]
         const fatal=all.find(r=>r.error)

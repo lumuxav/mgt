@@ -645,7 +645,7 @@ begin
  else raise exception 'Invalid statement party type'; end if;
  if v_party is null then raise exception 'Account not found or not accessible' using errcode='42501'; end if;
  with transactions as (
-  select 'sale-'||id::text id,(created_at at time zone v_tz)::date day,created_at at_time,'Sales invoice'::text type,sale_number reference,total_amount debit,0::numeric credit
+  select 'sale-'||id::text id,(created_at at time zone v_tz)::date as transaction_day,created_at at_time,'Sales invoice'::text type,sale_number reference,total_amount debit,0::numeric credit
   from public.sales where p_party_type='customer' and customer_id=p_party_id and status not in ('cancelled','void','draft')
   union all
   select 'return-'||id::text,(created_at at time zone v_tz)::date,created_at,'Sales return / credit',return_number,0,total_amount
@@ -667,12 +667,12 @@ begin
    case when (p_party_type='customer' and direction='in') or (p_party_type='supplier' and direction='out') then amount else 0 end
   from public.payments where (p_party_type='customer' and customer_id=p_party_id) or (p_party_type='supplier' and supplier_id=p_party_id)
  ), opening as (
-  select coalesce(v_base,0)+coalesce(sum(debit-credit),0) amount from transactions where day<p_start_date
+  select coalesce(v_base,0)+coalesce(sum(debit-credit),0) amount from transactions where transaction_day<p_start_date
  ), period_rows as (
-  select t.id,t.day date,t.type,t.reference,t.debit,t.credit,
-   (select amount from opening)+sum(t.debit-t.credit) over(order by t.day,t.at_time,t.id rows between unbounded preceding and current row) balance,
+  select t.id,t.transaction_day as date,t.type,t.reference,t.debit,t.credit,
+   (select amount from opening)+sum(t.debit-t.credit) over(order by t.transaction_day,t.at_time,t.id rows between unbounded preceding and current row) balance,
    t.at_time
-  from transactions t where day between p_start_date and p_end_date
+  from transactions t where transaction_day between p_start_date and p_end_date
  )
  select jsonb_build_object('party',v_party-'opening_balance'-'opening_balance_paid','opening',(select amount from opening),
   'rows',coalesce((select jsonb_agg(to_jsonb(r)-'at_time' order by r.date,r.at_time,r.id) from period_rows r),'[]'::jsonb),
