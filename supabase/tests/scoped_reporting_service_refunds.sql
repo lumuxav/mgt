@@ -52,8 +52,8 @@ begin
  perform public.calculate_payroll_period(payroll);
  result:=public.create_service_work_order(loc_b,customer,'Private other branch job',p_quoted_amount=>30); remote_job:=(result->>'work_order_id')::uuid;
  perform public.record_work_order_payment(remote_job,30,'bank');
- insert into public.projects(organization_id,location_id,name,manager_user_id) values(org,loc_a,'Scoped project',actor) returning id into local_project;
- insert into public.projects(organization_id,location_id,name,manager_user_id) values(org,loc_b,'Private project',employee_b) returning id into remote_project;
+ insert into public.projects(organization_id,location_id,project_number,name,manager_user_id) values(org,loc_a,'SCOPE-A','Scoped project',actor) returning id into local_project;
+ insert into public.projects(organization_id,location_id,project_number,name,manager_user_id) values(org,loc_b,'SCOPE-B','Private project',employee_b) returning id into remote_project;
  insert into public.project_members(organization_id,project_id,user_id) values(org,local_project,employee_a),(org,remote_project,employee_b);
  update public.user_work_scope set scope='location',location_id=loc_a where user_id=actor and organization_id=org;
  private_notification:=public.emit_notification(org,actor,null,'scope-private-fixture','operations','warning','Private other branch job','Private fixture details','/work-orders','Open job','work_order',remote_job::text,'fixture');
