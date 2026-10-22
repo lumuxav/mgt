@@ -18,7 +18,9 @@ docker exec "$mgt_container" pg_dump -U postgres -d postgres --format=custom --d
   age --recipient "$mgt_recipient" > "$mgt_drill_dir/fixture-data.dump.age"
 test -s "$mgt_drill_dir/fixture-data.dump.age"
 
-mgt_psql -q <<'SQL'
+# Only the disposable container's existing maintenance role may clear managed auth tables.
+# Do not grant these privileges to the app or use this procedure on a hosted project.
+docker exec -i "$mgt_container" psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 -q <<'SQL'
 do $$ declare tables text; begin
  select string_agg(format('%I.%I',schemaname,tablename),',') into tables
  from pg_tables where schemaname in ('public','auth');
@@ -27,7 +29,7 @@ do $$ declare tables text; begin
 end $$;
 SQL
 age --decrypt --identity "$mgt_drill_dir/identity" "$mgt_drill_dir/fixture-data.dump.age" |
-  docker exec -i "$mgt_container" pg_restore -U postgres -d postgres --data-only --disable-triggers --single-transaction --exit-on-error
+  docker exec -i "$mgt_container" pg_restore -U supabase_admin -d postgres --data-only --disable-triggers --single-transaction --exit-on-error
 mgt_psql -Atq < tests/database/restore-manifest.sql > "$mgt_drill_dir/after.txt"
 diff -u "$mgt_drill_dir/before.txt" "$mgt_drill_dir/after.txt"
 mgt_psql -q < tests/database/restore-verify.sql
