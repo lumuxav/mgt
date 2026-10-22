@@ -107,6 +107,8 @@ begin
  perform pg_temp.verify('Cancelled job has no remaining debt',(select status='cancelled' and final_amount=0 and amount_paid=0 from public.work_orders where id=job));
  perform pg_temp.verify('Refund is written once',(select count(*)=1 from public.payments where work_order_id=job and direction='out'));
  perform pg_temp.verify('Bank refund has a linked withdrawal',(select count(*)=1 from public.banking_transactions where source_payment_id=(result->>'payment_id')::uuid and amount=20 and transaction_type='withdrawal'));
+ perform pg_temp.verify('Bank refund credits bank ledger exactly once',(select count(*)=1 and sum(l.credit)=20 from public.accounting_journals j join public.accounting_journal_lines l on l.journal_id=j.id join public.accounting_accounts a on a.id=l.account_id where j.organization_id=org and j.source_type='payment' and j.source_id=result->>'payment_id' and a.code='1010'));
+ perform pg_temp.verify('Linked refund does not duplicate its accounting journal',not exists(select 1 from public.accounting_journals j join public.banking_transactions b on b.id::text=j.source_id where j.source_type='bank_transaction' and b.source_payment_id=(result->>'payment_id')::uuid));
  perform pg_temp.verify('Materials restored once',(select quantity=100 from public.stock_balances where product_id=product and location_id=loc_a));
  perform pg_temp.verify('Historical service lines are preserved',(select count(*)=1 from public.work_order_lines where work_order_id=job));
  perform pg_temp.verify('Authoritative bank balance includes refund',(select balance=980 from public.get_bank_account_summaries() where id=bank));

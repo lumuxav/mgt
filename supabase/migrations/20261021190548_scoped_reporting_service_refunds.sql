@@ -544,6 +544,52 @@ revoke all on function public.get_scoped_payroll_periods() from public,anon;
 grant execute on function public.get_scoped_payroll_periods() to authenticated,service_role;
 
 
+CREATE OR REPLACE FUNCTION public.accounting_sync_bank_transaction(p_tx_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+ b public.banking_transactions%rowtype; v_lines jsonb; v_code text;
+begin
+ select * into b from public.banking_transactions where id=p_tx_id;
+ if not found or b.status<>'confirmed' or coalesce(b.amount,0)<=0 then return; end if;
+ if b.source_expense_id is not null then
+  if not exists(select 1 from public.expenses e where e.id=b.source_expense_id
+   and e.organization_id=b.organization_id and e.bank_account_id=b.bank_account_id
+   and e.amount=b.amount and e.payment_method<>'cash' and b.transaction_type='withdrawal') then
+   raise exception 'Bank transaction does not match its expense';
+  end if;
+  return;
+ end if;
+ if b.source_payment_id is not null then
+  if not exists(select 1 from public.payments p where p.id=b.source_payment_id
+   and p.organization_id=b.organization_id and p.amount=b.amount
+   and (
+    (b.transaction_type='deposit' and (p.payment_type='bank_deposit' or (p.direction='in' and p.method<>'cash')))
+    or (b.transaction_type='withdrawal' and p.direction='out' and p.payment_type='job_refund'
+     and p.work_order_id is not null and p.method<>'cash' and p.location_id is not distinct from b.location_id)
+   )) then
+   raise exception 'Bank transaction does not match its payment';
+  end if;
+  perform public.accounting_sync_payment(b.source_payment_id);
+  return;
+ end if;
+ select public.accounting_bank_account_code(account_type) into v_code from public.bank_accounts where id=b.bank_account_id and organization_id=b.organization_id;
+ v_code:=coalesce(v_code,'1010');
+ if b.transaction_type='deposit' then
+  v_lines:=jsonb_build_array(jsonb_build_object('code',v_code,'debit',b.amount),jsonb_build_object('code','3900','credit',b.amount));
+ else
+  v_lines:=jsonb_build_array(jsonb_build_object('code','3900','debit',b.amount),jsonb_build_object('code',v_code,'credit',b.amount));
+ end if;
+ perform public.accounting_write_journal(b.organization_id,b.location_id,b.created_at::date,'bank_transaction',b.id::text,
+  initcap(b.transaction_type)||' - financial account',b.reference,'financing',v_lines,b.recorded_by);
+end; $function$
+;
+
+revoke all on function public.accounting_sync_bank_transaction(uuid) from public,anon,authenticated;
+
 -- A cancellation is a recorded, completed refund; this RPC does not transfer funds at a provider.
 create table public.service_cancellation_requests(
  organization_id uuid not null references public.organizations(id),
