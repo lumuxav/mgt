@@ -42,9 +42,9 @@ export default function PurchasingPage() {
   const canPay = permissions.includes('purchasing.pay') || permissions.includes('finance.manage')
 
   const load = async () => {
-    setLoading(true)
     try {
       const ctx = await getPlatformContext()
+      setLoading(true)
       setContext(ctx)
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
@@ -52,7 +52,7 @@ export default function PurchasingPage() {
       const [permRes, productRes, supplierRes, locationRes, purchaseRes, itemRes, balanceRes] = await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('products').select('id,name,sku,cost_price,track_inventory,unit').eq('organization_id', org).eq('active', true).order('name'),
-        supabase.from('suppliers').select('id,name,phone,email,opening_balance,opening_balance_paid').eq('organization_id', org).eq('active', true).order('name'),
+        supabase.rpc('get_scoped_suppliers').select('id,name,phone,email,opening_balance,opening_balance_paid').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true).order('name'),
         supabase.from('purchases').select('id,purchase_number,location_id,supplier_id,status,approval_status,payment_status,total_amount,amount_paid,due_date,supplier_invoice_number,ordered_at,received_at,created_at,notes,suppliers(name),locations(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(300),
         supabase.from('purchase_items').select('id,purchase_id,product_id,description,quantity,received_quantity,unit_cost,line_total,products(name,sku,unit)').order('id'),

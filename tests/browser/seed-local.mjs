@@ -78,10 +78,16 @@ const trial=await anonymous.auth.signInWithPassword({email:accounts.owner.email,
 if(trial.error||!trial.data?.session?.access_token){
  throw Error('Disposable account password authentication failed before browser launch: '+(trial.error?.message||'no session'))
 }
+const refundProduct=await checked(await admin.from('products').insert({organization_id:company.id,name:'CI Refund Material',selling_price:10,cost_price:4,track_inventory:true}).select('id').single(),'create refund material')
+await checked(await admin.from('stock_balances').insert({product_id:refundProduct.id,location_id:office.id,quantity:5}),'seed refund material')
+const refundBank=await checked(await admin.from('bank_accounts').insert({organization_id:company.id,name:'CI Refund Bank',account_type:'bank',opening_balance:1000}).select('id').single(),'create refund bank')
+const refundJob=await checked(await anonymous.rpc('create_service_work_order',{p_location_id:office.id,p_customer_id:null,p_title:'CI Refund Retry Job'}),'create refund job')
+await checked(await anonymous.rpc('add_work_order_line',{p_work_order_id:refundJob.work_order_id,p_line_type:'material',p_product_id:refundProduct.id,p_description:'Returnable material',p_quantity:1,p_unit_price:10,p_unit_cost:4}),'issue refund material')
+await checked(await anonymous.rpc('record_work_order_payment',{p_work_order_id:refundJob.work_order_id,p_amount:10,p_method:'bank'}),'record refund deposit')
 await anonymous.auth.signOut()
 console.log('Local Supabase public-key owner password authentication verified')
 const data={accounts,orgId:company.id,officeId:office.id,otherOfficeId:otherOffice.id,
- checkoutProductId:checkoutProduct.id,
+ checkoutProductId:checkoutProduct.id,refundProductId:refundProduct.id,refundBankId:refundBank.id,refundJobId:refundJob.work_order_id,
  workOrderId:workOrder.id,deliveryId:delivery.id,failedDeliveryId:failedDelivery.id}
 await fs.writeFile('/tmp/mgt-e2e-fixtures.json',JSON.stringify(data))
 console.log('Prepared '+roles.length+' disposable staff logins, one external tenant, branch-scoped service work and an assigned delivery')

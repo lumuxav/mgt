@@ -22,8 +22,8 @@ declare
  org uuid:=gen_random_uuid(); actor uuid:=gen_random_uuid(); employee_a uuid:=gen_random_uuid(); employee_b uuid:=gen_random_uuid();
  loc_a uuid:=gen_random_uuid(); loc_b uuid:=gen_random_uuid(); customer uuid:=gen_random_uuid(); supplier uuid:=gen_random_uuid();
  product uuid:=gen_random_uuid(); bank uuid:=gen_random_uuid(); job uuid; consumed_job uuid; cash_job uuid;
- remote_job uuid; request_id uuid:=gen_random_uuid(); result jsonb; retry jsonb; statement jsonb; snapshot jsonb;
- payroll uuid; connection uuid; provider_tx uuid; quantity_before numeric; till uuid; role_row record;
+ private_notification uuid; local_project uuid; remote_project uuid; remote_job uuid; request_id uuid:=gen_random_uuid(); result jsonb; retry jsonb; statement jsonb; snapshot jsonb;
+ statement_day date:=(now() at time zone 'Africa/Kampala')::date; payroll uuid; connection uuid; provider_tx uuid; quantity_before numeric; till uuid; role_row record;
 begin
  perform set_config('request.jwt.claims','{"role":"service_role"}',true);
  insert into auth.users(id,email) values(actor,actor||'@remaining.invalid'),(employee_a,employee_a||'@remaining.invalid'),(employee_b,employee_b||'@remaining.invalid');
@@ -52,8 +52,18 @@ begin
  perform public.calculate_payroll_period(payroll);
  result:=public.create_service_work_order(loc_b,customer,'Private other branch job',p_quoted_amount=>30); remote_job:=(result->>'work_order_id')::uuid;
  perform public.record_work_order_payment(remote_job,30,'bank');
+ insert into public.projects(organization_id,location_id,name,manager_user_id) values(org,loc_a,'Scoped project',actor) returning id into local_project;
+ insert into public.projects(organization_id,location_id,name,manager_user_id) values(org,loc_b,'Private project',employee_b) returning id into remote_project;
+ insert into public.project_members(organization_id,project_id,user_id) values(org,local_project,employee_a),(org,remote_project,employee_b);
  update public.user_work_scope set scope='location',location_id=loc_a where user_id=actor and organization_id=org;
+ private_notification:=public.emit_notification(org,actor,null,'scope-private-fixture','operations','warning','Private other branch job','Private fixture details','/work-orders','Open job','work_order',remote_job::text,'fixture');
+ insert into public.notification_deliveries(organization_id,notification_id,user_id,channel,recipient,status)
+ values(org,private_notification,actor,'email','fixture@invalid.test','queued');
+ perform pg_temp.verify('Email queue suppresses out-of-scope notification recipients',(select status='skipped' from public.notification_deliveries where notification_id=private_notification and user_id=actor));
  set local role authenticated;
+ perform pg_temp.verify('In-app notifications hide other-branch details',not exists(select 1 from public.notifications where id=private_notification));
+ perform pg_temp.verify('Project directory follows branch scope',(select count(*)=1 from public.projects where organization_id=org));
+ perform pg_temp.verify('Project membership inherits parent scope without recursion',(select count(*)=1 from public.project_members where organization_id=org));
  perform pg_temp.verify('Staff directory follows branch scope',(select count(*)=2 from public.users where organization_id=org));
  perform pg_temp.verify('HR profiles hide other branches',(select count(*)=1 from public.employee_profiles where organization_id=org));
  perform pg_temp.verify('Attendance hides other branches',(select count(*)=1 from public.attendance where organization_id=org));
@@ -72,10 +82,10 @@ begin
  perform pg_temp.verify('Bank summary masks whole-business balance',(select balance is null and not balance_visible from public.get_bank_account_summaries() where id=bank));
  snapshot:=public.get_business_insights();
  perform pg_temp.verify('Intelligence applies branch RLS',(select sum((d->>'sales')::numeric)=1011 from jsonb_array_elements(snapshot->'daily') d));
- statement:=public.get_party_statement('customer',customer,current_date-10,current_date);
+ statement:=public.get_party_statement('customer',customer,statement_day-10,statement_day);
  perform pg_temp.verify('Statement includes more than the REST row cap',jsonb_array_length(statement->'rows')=1002);
  perform pg_temp.verify('Statement excludes other-branch and organization opening amounts',(statement->>'closing')::numeric=1011 and (statement->>'opening')::numeric=0);
- statement:=public.get_party_statement('supplier',supplier,current_date-10,current_date);
+ statement:=public.get_party_statement('supplier',supplier,statement_day-10,statement_day);
  perform pg_temp.verify('Supplier statement excludes pending approvals and other branches',(statement->>'closing')::numeric=20);
  perform pg_temp.denied('HR mutations reject other-branch staff',format('select public.upsert_employee_hr_profile(%L)',employee_b),'outside your assigned work scope');
  perform pg_temp.denied('Wrong-branch cancellation rejected',format('select public.cancel_service_work_order(%L,%L,''Wrong branch'',30)',gen_random_uuid(),remote_job),'outside your assigned work scope');
@@ -117,6 +127,7 @@ begin
  insert into public.payment_provider_connections(organization_id,provider,name) values(org,'mtn_momo','Fixture connection') returning id into connection;
  insert into public.external_payment_transactions(organization_id,connection_id,provider,target_type,target_id,location_id,amount,external_reference,initiated_by)
  values(org,connection,'mtn_momo','work_order',cash_job,loc_a,1,'PENDING-REFUND-GUARD',actor) returning id into provider_tx;
+ perform pg_temp.denied('Second unresolved collection is blocked before provider dispatch',format('insert into public.external_payment_transactions(organization_id,connection_id,provider,target_type,target_id,amount,external_reference) values(%L,%L,''mtn_momo'',''work_order'',%L,1,''DUPLICATE-COLLECTION'')',org,connection,cash_job),'mgt_one_pending_collection');
  set local role authenticated;
  perform pg_temp.denied('Pending provider collection blocks cancellation',format('select public.cancel_service_work_order(%L,%L,''Pending test'',10)',gen_random_uuid(),cash_job),'Resolve pending provider');
  reset role;

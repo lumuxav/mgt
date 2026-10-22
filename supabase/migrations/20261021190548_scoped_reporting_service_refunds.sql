@@ -533,9 +533,10 @@ returns setof public.payroll_periods language sql stable security definer set se
   select sum(gross_pay) gross,sum(deductions) deductions,sum(net_pay) net,count(*) n
   from public.payroll_entries where payroll_period_id=p.id and organization_id=p.organization_id
    and public.mgt_record_scope_allows(organization_id,location_id,user_id)
+   and (user_id=auth.uid() or public.has_permission('payroll.view') or public.has_permission('payroll.manage') or public.has_permission('payroll.pay'))
  ) e on true
  where p.organization_id=public.current_organization_id()
-  and (public.has_permission('payroll.view') or public.has_permission('payroll.manage') or public.has_permission('payroll.pay'))
+  and (public.has_permission('payroll.view') or public.has_permission('payroll.manage') or public.has_permission('payroll.pay') or exists(select 1 from public.payroll_entries mine where mine.payroll_period_id=p.id and mine.user_id=auth.uid() and mine.organization_id=p.organization_id))
   and (public.mgt_record_scope_allows(p.organization_id,null,null) or e.n>0)
  order by p.start_date desc
 $$;
@@ -637,6 +638,12 @@ end; $$;
 revoke all on function public.cancel_service_work_order(uuid,uuid,text,numeric,text,uuid,text,boolean) from public,anon;
 grant execute on function public.cancel_service_work_order(uuid,uuid,text,numeric,text,uuid,text,boolean) to authenticated,service_role;
 
+-- Only one unresolved collection per document/account can be dispatched at a time.
+-- Existing unresolved rows must be reconciled before deploying this uniqueness guard.
+create unique index mgt_one_pending_collection on public.external_payment_transactions
+ (organization_id,target_type,(coalesce(target_id,customer_id)))
+ where transaction_type='collection' and status in ('created','pending');
+
 create or replace function public.mgt_work_order_provider_guard()
 returns trigger language plpgsql security definer set search_path=public as $$
 declare v_status text;
@@ -724,4 +731,77 @@ begin
 end; $$;
 revoke all on function public.get_party_statement(text,uuid,date,date) from public,anon;
 grant execute on function public.get_party_statement(text,uuid,date,date) to authenticated,service_role;
+
+
+-- Notifications contain financial and personnel details; scope applies to their delivery too.
+create or replace function public.mgt_notification_allowed_for(p_notification uuid,p_user uuid)
+returns boolean language plpgsql stable security definer set search_path=public as $$
+declare n public.notifications%rowtype; s public.user_work_scope%rowtype;
+ v_id uuid; v_location uuid; v_owner uuid; v_assigned boolean:=false;
+begin
+ select * into n from public.notifications where id=p_notification;
+ if not found then return false; end if;
+ if not exists(select 1 from public.users u join public.organizations o on o.id=u.organization_id
+  where u.id=p_user and u.organization_id=n.organization_id and u.active and u.archived_at is null and o.active) then return false; end if;
+ if n.recipient_user_id is not null and n.recipient_user_id<>p_user then return false; end if;
+ if n.recipient_user_id is null and n.audience_permission is not null
+  and not public.user_has_permission_for(p_user,n.organization_id,n.audience_permission) then return false; end if;
+ select * into s from public.user_work_scope where user_id=p_user and organization_id=n.organization_id;
+ if not found or s.scope='organization' then return true; end if;
+ if n.entity_type='customer' then return false; end if; -- Customer credit alerts aggregate the whole organization.
+ if n.entity_type is null or n.entity_id is null then return coalesce(n.recipient_user_id=p_user,false) or n.category='system'; end if;
+ begin v_id:=n.entity_id::uuid; exception when invalid_text_representation then return false; end;
+ case n.entity_type
+  when 'product' then
+   begin v_location:=(n.metadata->>'location_id')::uuid; exception when invalid_text_representation then return false; end;
+  when 'purchase' then select location_id,created_by into v_location,v_owner from public.purchases where id=v_id and organization_id=n.organization_id;
+  when 'work_order' then
+   select location_id,assigned_to into v_location,v_owner from public.work_orders where id=v_id and organization_id=n.organization_id;
+   v_assigned:=exists(select 1 from public.work_order_assignments where work_order_id=v_id and user_id=p_user);
+  when 'project' then
+   select location_id,manager_user_id into v_location,v_owner from public.projects where id=v_id and organization_id=n.organization_id;
+   v_assigned:=exists(select 1 from public.project_members where project_id=v_id and user_id=p_user and active);
+  when 'project_task' then
+   select p.location_id,t.assigned_user_id into v_location,v_owner from public.project_tasks t join public.projects p on p.id=t.project_id where t.id=v_id and p.organization_id=n.organization_id;
+  when 'project_milestone' then
+   select p.location_id,p.manager_user_id into v_location,v_owner from public.project_milestones t join public.projects p on p.id=t.project_id where t.id=v_id and p.organization_id=n.organization_id;
+  when 'project_invoice' then
+   select p.location_id,p.manager_user_id into v_location,v_owner from public.project_invoices t join public.projects p on p.id=t.project_id where t.id=v_id and p.organization_id=n.organization_id;
+  when 'asset' then select location_id,assigned_user_id into v_location,v_owner from public.assets where id=v_id and organization_id=n.organization_id;
+  when 'asset_maintenance' then select location_id,assigned_user_id into v_location,v_owner from public.asset_maintenance where id=v_id and organization_id=n.organization_id;
+  when 'vehicle' then select location_id,assigned_driver_id into v_location,v_owner from public.vehicles where id=v_id and organization_id=n.organization_id;
+  when 'delivery' then select source_location_id,driver_user_id into v_location,v_owner from public.deliveries where id=v_id and organization_id=n.organization_id;
+  when 'quotation' then select location_id,created_by into v_location,v_owner from public.quotations where id=v_id and organization_id=n.organization_id;
+  when 'approval_request' then select location_id,requested_by into v_location,v_owner from public.approval_requests where id=v_id and organization_id=n.organization_id;
+  when 'payroll_entry' then select location_id,user_id into v_location,v_owner from public.payroll_entries where id=v_id and organization_id=n.organization_id;
+  when 'leave_request' then select u.default_location_id,l.user_id into v_location,v_owner from public.leave_requests l join public.users u on u.id=l.user_id where l.id=v_id and l.organization_id=n.organization_id;
+  when 'external_payment' then select location_id,initiated_by into v_location,v_owner from public.external_payment_transactions where id=v_id and organization_id=n.organization_id;
+  else return coalesce(n.recipient_user_id=p_user,false) and n.category='system';
+ end case;
+ return case s.scope when 'location' then coalesce(s.location_id=v_location,false)
+  when 'assigned' then coalesce(v_owner=p_user,false) or v_assigned else false end;
+end; $$;
+revoke all on function public.mgt_notification_allowed_for(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.mgt_notification_allowed_for(uuid,uuid) to service_role;
+create or replace function public.mgt_notification_allowed(p_notification uuid)
+returns boolean language sql stable security definer set search_path=public as $$
+ select public.mgt_notification_allowed_for(p_notification,auth.uid())
+$$;
+revoke all on function public.mgt_notification_allowed(uuid) from public,anon;
+grant execute on function public.mgt_notification_allowed(uuid) to authenticated,service_role;
+create policy mgt_report_scope on public.notifications as restrictive for select to authenticated using(public.mgt_notification_allowed(id));
+create policy mgt_report_scope on public.notification_deliveries as restrictive for select to authenticated using(public.mgt_notification_allowed(notification_id));
+
+-- Recheck queued messages when staff scopes change, even if their payload predates this migration.
+create or replace function public.mgt_notification_delivery_scope_guard()
+returns trigger language plpgsql security definer set search_path=public as $$
+begin
+ if new.status in ('queued','processing') and not public.mgt_notification_allowed_for(new.notification_id,new.user_id) then
+  new.status:='skipped'; new.error_message:='Notification is outside the recipient work scope';
+ end if;
+ return new;
+end; $$;
+revoke all on function public.mgt_notification_delivery_scope_guard() from public,anon,authenticated;
+create trigger mgt_notification_delivery_scope_guard before insert or update on public.notification_deliveries
+ for each row execute function public.mgt_notification_delivery_scope_guard();
 

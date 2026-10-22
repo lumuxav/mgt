@@ -26,6 +26,7 @@ export async function POST(req){
   if(check.error)return NextResponse.json({error:check.error},{status:check.status})
   const {adminClient,organizationId,caller}=check
   let transaction=null
+  let providerAccepted=false
   try{
     const rate=await consumeServerRateLimit(adminClient,{
       scope:'external_payment_request',
@@ -60,6 +61,7 @@ export async function POST(req){
     if(!/^256\d{9}$/.test(phone))throw new Error('Enter a valid Ugandan mobile-money number.')
 
     const externalReference=ref()
+    const providerReference=crypto.randomUUID()
     const callbackToken=crypto.randomBytes(32).toString('hex')
     const origin=new URL(req.url).origin
     const currency=String(connectionRow.currency||body.currency||'UGX').toUpperCase()
@@ -67,11 +69,14 @@ export async function POST(req){
     const {data:inserted,error:insertError}=await adminClient.from('external_payment_transactions').insert({
       organization_id:organizationId,connection_id:connectionRow.id,provider:connectionRow.provider,transaction_type:'collection',
       target_type:targetType,target_id:targetId,location_id:target.locationId||caller.default_location_id||null,
-      customer_id:target.customerId||body.customer_id||null,amount,currency,payer_phone:phone,external_reference:externalReference,
+      customer_id:target.customerId||body.customer_id||null,amount,currency,payer_phone:phone,external_reference:externalReference,provider_reference:providerReference,
       status:'created',settlement_status:'pending',client_token_hash:sha(callbackToken),initiated_by:caller.id,
       metadata:{label:target.label,balance_before:target.balance,created_from:'mgt_payments'},
     }).select('*').single()
-    if(insertError)throw insertError
+    if(insertError){
+      if(insertError.code==='23505')throw new Error('An unresolved collection already exists for this account or document. Check its status before requesting another.')
+      throw insertError
+    }
     transaction=inserted
 
     const {data:connection,error:secretError}=await adminClient.rpc('server_get_payment_provider_connection',{
@@ -81,8 +86,9 @@ export async function POST(req){
 
     const callbackUrl=`${origin}/api/payments/webhooks/${connectionRow.provider}?id=${inserted.id}&token=${callbackToken}`
     const providerResult=await requestProviderPayment(connection,{
-      reference:externalReference,phone,amount,currency,callbackUrl,note:target.label,targetType,targetId,
+      reference:externalReference,providerReference,phone,amount,currency,callbackUrl,note:target.label,targetType,targetId,
     })
+    providerAccepted=true
 
     const updated=await saveProviderStatus(adminClient,inserted,{
       status:providerResult.status||'pending',
@@ -101,12 +107,21 @@ export async function POST(req){
     return NextResponse.json({ok:true,transaction:updated})
   }catch(error){
     if(transaction?.id){
-      await check.adminClient.from('external_payment_transactions').update({
-        status:'failed',failure_reason:String(error.message||'Payment request failed').slice(0,500),updated_at:new Date().toISOString(),completed_at:new Date().toISOString(),
-      }).eq('id',transaction.id).eq('organization_id',check.organizationId).neq('status','succeeded').neq('settlement_status','settled')
-      await check.adminClient.from('external_payment_events').insert({
-        organization_id:check.organizationId,transaction_id:transaction.id,event_type:'request_failed',status:'failed',payload:{error:String(error.message||'Payment request failed').slice(0,500)}
-      })
+      const unresolved=Boolean(error.providerRequestUncertain||providerAccepted)
+      const failureStatus=unresolved?'pending':'failed'
+      const warning='Provider response was not confirmed. Check this transaction status before requesting another collection.'
+      try{
+        const updated=await saveProviderStatus(check.adminClient,transaction,{
+          status:failureStatus,failure_reason:unresolved?warning:String(error.message||'Payment request failed').slice(0,500),updated_at:new Date().toISOString(),completed_at:unresolved?null:new Date().toISOString(),
+        })
+        await check.adminClient.from('external_payment_events').insert({
+          organization_id:check.organizationId,transaction_id:transaction.id,event_type:unresolved?'request_unconfirmed':'request_failed',status:updated.status,payload:{error:unresolved?warning:String(error.message||'Payment request failed').slice(0,500)}
+        })
+        if(unresolved)return NextResponse.json({ok:true,transaction:updated,warning},{status:202})
+      }catch{
+        // The persisted created row/reference still blocks a duplicate request.
+        return NextResponse.json({error:'The provider result could not be saved. Check transaction history before retrying.',transaction_id:transaction.id},{status:503})
+      }
     }
     return NextResponse.json({error:error.message||'Payment request failed.'},{status:400})
   }

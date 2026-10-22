@@ -5,15 +5,13 @@ import { useParams } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { statementDates } from '../../lib/statementDates'
 import { businessDocumentProfile, dateText, DocumentFooter, DocumentHeader, DocumentPaper, DocumentToolbar, money, PartyBlock, shareDocument } from './BusinessDocument'
-
-const today=()=>new Date().toISOString().slice(0,10)
-const dateAgo=days=>{const date=new Date();date.setDate(date.getDate()-days);return date.toISOString().slice(0,10)}
 
 export default function PartyStatement({kind}) {
   const {id}=useParams()
-  const [startDate,setStartDate]=useState(()=>dateAgo(89))
-  const [endDate,setEndDate]=useState(today)
+  const [startDate,setStartDate]=useState(null)
+  const [endDate,setEndDate]=useState(null)
   const [retry,setRetry]=useState(0)
   const [result,setResult]=useState({key:'',data:null,context:null,error:''})
   const [message,setMessage]=useState('')
@@ -27,8 +25,13 @@ export default function PartyStatement({kind}) {
     const controller=new AbortController()
     ;(async()=>{
       try{
-        if(!startDate||!endDate||startDate>endDate)throw new Error('Choose a valid statement period.')
         const context=await getPlatformContext()
+        if(startDate===null&&endDate===null){
+          const dates=statementDates(context.organization?.timezone||'UTC')
+          if(active){setStartDate(dates.startDate);setEndDate(dates.endDate)}
+          return
+        }
+        if(!startDate||!endDate||startDate>endDate)throw new Error('Choose a valid statement period.')
         const {data,error}=await supabase.rpc('get_party_statement',{p_party_type:kind,p_party_id:id,p_start_date:startDate,p_end_date:endDate}).abortSignal(controller.signal)
         if(error)throw error
         if(active)setResult({key:requestKey,data,context,error:''})
@@ -49,8 +52,8 @@ export default function PartyStatement({kind}) {
   return <main className="page-wrap">
     <DocumentToolbar backHref={`/statements/${kind}s`} backLabel={`${title}s`} onShare={statement?share:undefined}/>
     <div className="mb-5 flex flex-wrap gap-3 page-card p-4 print:hidden">
-      <label><span className="mb-1 block text-xs font-bold text-muted">From</span><input className="input-base" type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label>
-      <label><span className="mb-1 block text-xs font-bold text-muted">To</span><input className="input-base" type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label>
+      <label><span className="mb-1 block text-xs font-bold text-muted">From</span><input className="input-base" type="date" value={startDate||''} onChange={e=>setStartDate(e.target.value)}/></label>
+      <label><span className="mb-1 block text-xs font-bold text-muted">To</span><input className="input-base" type="date" value={endDate||''} onChange={e=>setEndDate(e.target.value)}/></label>
     </div>
     {pending&&<p className="text-muted" role="status">Loading statement…</p>}
     {!pending&&result.error&&<div className="page-card p-5" role="alert"><p className="text-red-500">{result.error}</p><button className="btn-secondary mt-3 rounded-xl px-3 py-2" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>}

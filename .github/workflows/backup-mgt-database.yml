@@ -1,0 +1,41 @@
+name: Encrypted MGT Database Backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mgt-encrypted-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.ref == 'refs/heads/universal-business-platform'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install encryption utility
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes age
+      - name: Export one consistent encrypted MGT snapshot
+        env:
+          MGT_BACKUP_DATABASE_URL: ${{ secrets.MGT_BACKUP_DATABASE_URL }}
+          MGT_BACKUP_AGE_RECIPIENT: ${{ secrets.MGT_BACKUP_AGE_RECIPIENT }}
+        run: node scripts/backup-mgt.cjs
+      - name: Store encrypted snapshot and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: MGT-encrypted-backup-${{ github.run_id }}
+          path: backup-artifact/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove runner copy
+        if: always()
+        run: rm -rf backup-artifact
