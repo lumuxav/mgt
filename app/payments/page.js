@@ -45,6 +45,7 @@ export default function PaymentsPage(){
     setLoading(true);setMessage(null)
     try{
       const ctx=await getPlatformContext()
+      setLoading(true)
       setContext(ctx)
       if(!ctx.organization?.id)throw new Error('Complete business setup first.')
       const org=ctx.organization.id
@@ -122,7 +123,7 @@ export default function PaymentsPage(){
       amount:Number(collect.amount),payer_phone:collect.payer_phone,currency,
     })})
     if(result.ok){
-      setMessage({type:'success',text:`Payment request ${result.transaction.external_reference} sent. Ask the customer to approve it on their phone.`})
+      setMessage({type:result.warning?'error':'success',text:result.warning||`Payment request ${result.transaction.external_reference} sent. Ask the customer to approve it on their phone.`})
       setTransactions(v=>[result.transaction,...v.filter(x=>x.id!==result.transaction.id)])
       setCollect(v=>({...v,target_key:'',amount:'',payer_phone:'',customer_id:''}))
       setTab('transactions')
@@ -216,7 +217,7 @@ export default function PaymentsPage(){
     {tab==='collect'&&<section className="grid gap-5 xl:grid-cols-[430px_1fr]">
       <form onSubmit={requestPayment} className="page-card h-fit p-5">
         <h2 className="font-black">Request mobile-money payment</h2>
-        <p className="mt-1 text-xs leading-5 text-muted">The customer receives a provider prompt and approves the debit on their own phone. MGT never asks for or stores the customer's PIN.</p>
+        <p className="mt-1 text-xs leading-5 text-muted">The customer receives a provider prompt and approves the debit on their own phone. MGT never asks for or stores the customer&apos;s PIN.</p>
         <select required className="input-base mt-4" value={collect.connection_id} onChange={e=>setCollect({...collect,connection_id:e.target.value})}><option value="">Choose provider</option>{connections.filter(x=>x.active).map(x=><option key={x.id} value={x.id}>{x.name} · {providerLabel(x.provider)}</option>)}</select>
         <select required className="input-base mt-3" value={collect.target_key} onChange={e=>selectTarget(e.target.value)}><option value="">What is being paid?</option>{targets.map(x=><option key={x.key} value={x.key}>{x.label} · {money(x.amount,currency)}</option>)}</select>
         <input required className="input-base mt-3" type="number" min="0.01" step="0.01" placeholder="Amount" value={collect.amount} onChange={e=>setCollect({...collect,amount:e.target.value})}/>

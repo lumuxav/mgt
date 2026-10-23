@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import { createClient } from "npm:@supabase/supabase-js@2"
+import { createClient } from "npm:@supabase/supabase-js@2.116.0"
 
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json"}})
 const esc=(value:string)=>String(value||"").replace(/[&<>"']/g,(ch)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]||ch))
@@ -43,7 +43,13 @@ Deno.serve(async(req)=>{
   for(const item of queue||[]){
     const attempt=Number(item.attempt_count||0)+1
     const stamp=new Date().toISOString()
-    await admin.from("notification_deliveries").update({status:"processing",last_attempt_at:stamp,attempt_count:attempt,updated_at:stamp}).eq("id",item.id)
+    const {data:claimed,error:claimError}=await admin.from("notification_deliveries")
+      .update({status:"processing",last_attempt_at:stamp,attempt_count:attempt,updated_at:stamp})
+      .eq("id",item.id).in("status",["queued","failed"]).eq("attempt_count",item.attempt_count)
+      .select("id,status").maybeSingle()
+    if(claimError)return json({error:"Could not claim notification delivery"},500)
+    // The database also rejects recipients who lost permission or work scope.
+    if(claimed?.status!=="processing")continue
 
     const [notificationRes,settingsRes,orgRes]=await Promise.all([
       admin.from("notifications").select("id,title,body,href,action_label,severity,category,resolved_at,expires_at").eq("id",item.notification_id).maybeSingle(),

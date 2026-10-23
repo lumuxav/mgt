@@ -5,8 +5,8 @@
 | Device | File in the latest release | Installation |
 | --- | --- | --- |
 | Android / Redmi | `MGT-Business-Suite-Test.apk` | Download on the phone, open the APK, and allow installation from that source if prompted. It is test-signed and uses a separate app identity. |
-| Windows 10/11, Intel/AMD 64-bit | `MGT-Business-Suite-Windows-x64.exe` | Run the installer and choose the installation folder. The installer is unsigned; Windows may show an unknown-publisher warning. |
-| Mac with Apple silicon | `MGT-Business-Suite-macOS-arm64.dmg` | Open the disk image and drag MGT to Applications. It has an ad-hoc signature, without Apple notarization. |
+| Windows 10/11, Intel/AMD 64-bit | `MGT-Business-Suite-Windows-x64.exe` | Run the installer and choose the installation folder. Check `SIGNING.md` in that release for its verified signature status. Unsigned packages may show an unknown-publisher warning. |
+| Mac with Apple silicon | `MGT-Business-Suite-macOS-arm64.dmg` | Open the disk image and drag MGT to Applications. Check `SIGNING.md` for Developer ID signing and notarization; releases without configured credentials use an ad-hoc signature. |
 | Mac with Intel processor | `MGT-Business-Suite-macOS-x64.dmg` | Use the Intel image. Signing status is the same as the Apple-silicon package. |
 | Linux, Intel/AMD 64-bit | `MGT-Business-Suite-Linux-x64.AppImage` | Mark the file executable and open it. AppImage support/FUSE may be required by the distribution. |
 | iPhone / iPad | Browser installation | Open MGT in Safari, then **Share → Add to Home Screen → Add**. No installable IPA is published. |
@@ -65,3 +65,18 @@ The exact approved MGT icon must be used for browser favicons, PWA tiles, Androi
 
 
 The approved October icon refresh is included in the coordinated native release. Install updated app packages to refresh Android/desktop launcher artwork. An older PWA may require uninstalling and reinstalling for an operating-system-cached launcher icon.
+
+## Production desktop signing
+
+Add the existing signing identity to GitHub Actions secrets. Do not rotate or generate replacement identities to make a build pass.
+
+| Platform | Required secrets |
+| --- | --- |
+| Windows | `MGT_WINDOWS_CERTIFICATE_BASE64` (exportable PFX), `MGT_WINDOWS_CERTIFICATE_PASSWORD` |
+| macOS | `MGT_MAC_CERTIFICATE_BASE64` (Developer ID Application P12), `MGT_MAC_CERTIFICATE_PASSWORD`, `MGT_APPLE_API_KEY_BASE64` (P8), `MGT_APPLE_API_KEY_ID`, `MGT_APPLE_API_ISSUER` |
+
+The production branch uses configured credentials, forces signing, and fails on partial configuration. Windows installers and application executables must pass Authenticode validation. macOS applications must pass codesign, stapler, and Gatekeeper checks. Certificates and notarization keys exist only in a temporary build directory and are removed after packaging. Pull requests never sign or receive these credentials.
+
+If no credentials are configured, test distributions remain available and their manifests explicitly say unsigned/ad-hoc. This does **not** satisfy production signing acceptance. Each release includes per-platform `SIGNING-*.json` and `SIGNING.md` tied to its source commit. Linux AppImages use published checksums and are not claimed to be code-signed. Hardware-backed Windows certificates need a separately configured signing service; this workflow supports an existing exportable certificate.
+
+Reference: [electron-builder v26 signing](https://www.electron.build/v26/docs/features/code-signing/), matching the pinned builder major version.

@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { checkoutRequest, finishCheckout } from '../../lib/checkoutRequest'
 
 const money=(value,currency)=>`${Number(value||0).toLocaleString()} ${currency||''}`.trim()
 
@@ -33,6 +34,9 @@ export default function WorkOrdersPage(){
   const [lineForm,setLineForm]=useState({line_type:'service',product_id:'',description:'',quantity:'1',unit_price:'',unit_cost:''})
   const [payForm,setPayForm]=useState({amount:'',method:'cash',reference:'',notes:''})
   const [statusNotes,setStatusNotes]=useState('')
+  const [bankAccounts,setBankAccounts]=useState([])
+  const [cancelForm,setCancelForm]=useState({reason:'',method:'cash',account:'',reference:'',materials:''})
+  const cancelling=useRef(false)
 
   const currency=context?.organization?.currency||business.currency||'UGX'
   const canManage=permissions.includes('services.manage')
@@ -46,7 +50,7 @@ export default function WorkOrdersPage(){
       setContext(ctx)
       if(!ctx.organization?.id)throw new Error('Complete business setup first.')
       const org=ctx.organization.id
-      const [permRes,customerRes,locationRes,productRes,staffRes,orderRes,lineRes,assignRes,eventRes,paymentRes]=await Promise.all([
+      const [permRes,customerRes,locationRes,productRes,staffRes,orderRes,lineRes,assignRes,eventRes,paymentRes,bankRes]=await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('customers').select('id,name,phone,email').eq('organization_id',org).eq('active',true).order('name'),
         supabase.from('locations').select('id,name,type').eq('organization_id',org).eq('active',true).order('name'),
@@ -57,12 +61,14 @@ export default function WorkOrdersPage(){
         supabase.from('work_order_assignments').select('work_order_id,user_id,assigned_at'),
         supabase.from('work_order_events').select('id,work_order_id,event_type,description,metadata,user_id,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(3000),
         supabase.from('payments').select('id,work_order_id,direction,payment_type,method,amount,reference,notes,received_by,created_at').eq('organization_id',org).not('work_order_id','is',null).order('created_at',{ascending:false}).limit(2000),
+        supabase.from('bank_accounts').select('id,name,account_type').eq('organization_id',org).eq('active',true).order('name'),
       ])
-      for(const result of [permRes,customerRes,locationRes,productRes,staffRes,orderRes,lineRes,assignRes,eventRes,paymentRes])if(result.error)throw result.error
+      for(const result of [permRes,customerRes,locationRes,productRes,staffRes,orderRes,lineRes,assignRes,eventRes,paymentRes,bankRes])if(result.error)throw result.error
       setPermissions((permRes.data||[]).map((row)=>row.permission))
       setCustomers(customerRes.data||[])
       setLocations(locationRes.data||[])
       setProducts(productRes.data||[])
+      setBankAccounts(bankRes.data||[])
       setStaff(staffRes.data||[])
       setOrders(orderRes.data||[])
       const orderIds=new Set((orderRes.data||[]).map((row)=>row.id))
@@ -170,6 +176,7 @@ export default function WorkOrdersPage(){
     setLineForm({line_type:'service',product_id:'',description:'',quantity:'1',unit_price:'',unit_cost:''})
     setPayForm({amount:'',method:'cash',reference:'',notes:''})
     setStatusNotes('')
+    setCancelForm({reason:'',method:'cash',account:'',reference:'',materials:''})
   }
 
   const setStatus=async(status)=>{
@@ -201,6 +208,24 @@ export default function WorkOrdersPage(){
     setBusy(false)
   }
 
+  const cancelJob=async(event)=>{
+    event.preventDefault()
+    if(!selected||cancelling.current)return
+    cancelling.current=true;setBusy(true);setMessage(null)
+    const scope=`service.cancel.${context.organization.id}.${context.user.id}.${selected.id}`
+    try{
+      const payload={p_work_order_id:selected.id,p_reason:cancelForm.reason.trim(),p_expected_refund_amount:Number(selected.amount_paid||0),p_refund_method:cancelForm.method,p_bank_account_id:cancelForm.method==='cash'?null:(cancelForm.account||null),p_reference:cancelForm.reference.trim()||null,p_restore_materials:cancelForm.materials==='returned'}
+      const requestId=await checkoutRequest(sessionStorage,crypto,scope,payload)
+      const {data,error}=await supabase.rpc('cancel_service_work_order',{p_request_id:requestId,...payload})
+      if(error)throw error
+      finishCheckout(sessionStorage,scope)
+      setMessage({type:'success',text:`Job cancelled. Refund recorded: ${money(data.refunded_amount,currency)}.`})
+      setCancelForm({reason:'',method:'cash',account:'',reference:'',materials:''})
+      await load()
+    }catch(error){setMessage({type:'error',text:error.message||'Cancellation could not be confirmed. Retry with the same details.'})}
+    finally{cancelling.current=false;setBusy(false)}
+  }
+
   const filtered=useMemo(()=>{
     const term=search.trim().toLowerCase()
     const list=tab==='history'?orders.filter((order)=>['completed','cancelled'].includes(order.status)):orders.filter((order)=>!['completed','cancelled'].includes(order.status))
@@ -211,7 +236,7 @@ export default function WorkOrdersPage(){
   const active=orders.filter((order)=>!['completed','cancelled'].includes(order.status))
   const overdue=active.filter((order)=>order.due_at&&new Date(order.due_at)<new Date())
   const outstanding=orders.reduce((sum,order)=>{
-    const total=Number(order.final_amount??order.quoted_amount??0)
+    const total=order.status==='cancelled'?0:Number(order.final_amount??order.quoted_amount??0)
     return sum+Math.max(0,total-Number(order.amount_paid||0))
   },0)
   const completedProfit=orders.filter((order)=>order.status==='completed').reduce((sum,order)=>sum+Number(order.gross_profit||0),0)
@@ -247,7 +272,7 @@ export default function WorkOrdersPage(){
       <input className="input-base max-w-xl" placeholder="Search job number, title, customer, location or status…" value={search} onChange={(event)=>setSearch(event.target.value)}/>
       {!filtered.length&&<div className="page-card p-7 text-center text-sm text-muted">{tab==='history'?'No completed/cancelled jobs yet.':'No active service jobs.'}</div>}
       {filtered.map((order)=>{
-        const total=Number(order.final_amount??order.quoted_amount??0)
+        const total=order.status==='cancelled'?0:Number(order.final_amount??order.quoted_amount??0)
         const balance=Math.max(0,total-Number(order.amount_paid||0))
         const assigned=assignments.filter((row)=>row.work_order_id===order.id).map((row)=>staff.find((user)=>user.id===row.user_id)?.full_name).filter(Boolean)
         return <button key={order.id} type="button" onClick={()=>openJob(order)} className="page-card w-full p-4 text-left sm:p-5">
@@ -328,7 +353,7 @@ export default function WorkOrdersPage(){
               <h3 className="font-black">Job status</h3>
               <p className="mt-1 text-xs text-muted">Scheduled {selected.scheduled_at?new Date(selected.scheduled_at).toLocaleString():'—'} · due {selected.due_at?new Date(selected.due_at).toLocaleString():'—'}</p>
               <textarea className="input-base mt-3 min-h-16" placeholder="Status note (optional)" value={statusNotes} onChange={(event)=>setStatusNotes(event.target.value)}/>
-              {canManage&&!['completed','cancelled'].includes(selected.status)&&<div className="mt-3 grid grid-cols-2 gap-2"><button disabled={busy} type="button" onClick={()=>setStatus('in_progress')} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">In progress</button><button disabled={busy} type="button" onClick={()=>setStatus('on_hold')} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">On hold</button><button disabled={busy} type="button" onClick={()=>setStatus('completed')} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Complete</button><button disabled={busy} type="button" onClick={()=>setStatus('cancelled')} className="rounded-xl bg-red-500 px-3 py-2 text-xs font-black text-white">Cancel</button></div>}
+              {canManage&&!['completed','cancelled'].includes(selected.status)&&<div className="mt-3 grid grid-cols-2 gap-2"><button disabled={busy} type="button" onClick={()=>setStatus('in_progress')} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">In progress</button><button disabled={busy} type="button" onClick={()=>setStatus('on_hold')} className="btn-secondary rounded-xl px-3 py-2 text-xs font-black">On hold</button><button disabled={busy} type="button" onClick={()=>setStatus('completed')} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white">Complete</button></div>}
             </section>
 
             <section className="rounded-2xl border border-[var(--line)] p-4">
@@ -346,9 +371,21 @@ export default function WorkOrdersPage(){
               <button disabled={busy} className="btn-primary mt-3 w-full rounded-xl px-4 py-3 font-black disabled:opacity-50">{busy?'Recording...':'Record payment'}</button>
             </form>}
 
+            {canManage&&!['completed','cancelled'].includes(selected.status)&&<form onSubmit={cancelJob} className="rounded-2xl border border-red-500/30 p-4">
+              <h3 className="font-black">Refund and cancel job</h3>
+              <p className="mt-2 text-sm text-muted">Refund due: <strong>{money(selected.amount_paid,currency)}</strong>. This records money already returned to the customer. Mobile money, card and bank refunds must be completed with the provider first.</p>
+              <label className="mt-3 block text-sm">Reason<textarea required className="input-base mt-1" value={cancelForm.reason} onChange={e=>setCancelForm({...cancelForm,reason:e.target.value})}/></label>
+              {Number(selected.amount_paid)>0&&<>
+                <label className="mt-3 block text-sm">Refund method<select aria-label="Refund method" className="input-base mt-1" value={cancelForm.method} onChange={e=>setCancelForm({...cancelForm,method:e.target.value,account:''})}><option value="cash">Cash</option><option value="bank">Bank</option><option value="mobile_money">Mobile money</option><option value="card">Card</option><option value="cheque">Cheque</option></select></label>
+                {cancelForm.method!=='cash'&&<><label className="mt-3 block text-sm">Refund account<select aria-label="Refund account" required className="input-base mt-1" value={cancelForm.account} onChange={e=>setCancelForm({...cancelForm,account:e.target.value})}><option value="">Choose account</option>{bankAccounts.filter(a=>a.account_type===(cancelForm.method==='mobile_money'?'mobile_money':'bank')).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="mt-3 block text-sm">Completed refund reference<input required className="input-base mt-1" value={cancelForm.reference} onChange={e=>setCancelForm({...cancelForm,reference:e.target.value})}/></label></>}
+              </>}
+              {selectedLines.some(l=>l.line_type==='material')&&<label className="mt-3 block text-sm">Job materials<select aria-label="Job materials" required className="input-base mt-1" value={cancelForm.materials} onChange={e=>setCancelForm({...cancelForm,materials:e.target.value})}><option value="">Choose what happened</option><option value="returned">All issued materials physically returned to stock</option><option value="consumed">Materials consumed or not returned; keep their cost</option></select></label>}
+              <button disabled={busy} className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 font-bold text-white disabled:opacity-50">{busy?'Recording...':'Record refund and cancel job'}</button>
+            </form>}
+
             <section className="rounded-2xl border border-[var(--line)] overflow-hidden">
               <div className="border-b border-[var(--line)] p-4"><strong>Payments</strong></div>
-              <div className="max-h-64 divide-y divide-[var(--line)] overflow-y-auto">{!selectedPayments.length&&<p className="p-4 text-sm text-muted">No payments yet.</p>}{selectedPayments.map((payment)=><div key={payment.id} className="flex justify-between gap-3 p-4"><div><strong className="capitalize">{payment.payment_type.replaceAll('_',' ')}</strong><p className="mt-1 text-xs text-muted">{payment.method.replaceAll('_',' ')} · {new Date(payment.created_at).toLocaleString()}</p></div><strong className="text-emerald-600">+{money(payment.amount,currency)}</strong></div>)}</div>
+              <div className="max-h-64 divide-y divide-[var(--line)] overflow-y-auto">{!selectedPayments.length&&<p className="p-4 text-sm text-muted">No payments yet.</p>}{selectedPayments.map((payment)=><div key={payment.id} className="flex justify-between gap-3 p-4"><div><strong className="capitalize">{payment.payment_type.replaceAll('_',' ')}</strong><p className="mt-1 text-xs text-muted">{payment.method.replaceAll('_',' ')} · {new Date(payment.created_at).toLocaleString()}</p></div><strong className={payment.direction==='out'?'text-red-500':'text-emerald-600'}>{payment.direction==='out'?'-':'+'}{money(payment.amount,currency)}</strong></div>)}</div>
             </section>
           </div>
         </div>

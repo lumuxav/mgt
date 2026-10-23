@@ -35,16 +35,16 @@ export default function SuppliersPage() {
   const canPay = permissions.includes('purchasing.pay') || permissions.includes('finance.manage')
 
   const load = async () => {
-    setLoading(true)
     try {
       const ctx = await getPlatformContext()
+      setLoading(true)
       setContext(ctx)
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
 
       const [permRes,supplierRes,purchaseRes,paymentRes,locationRes,balanceRes] = await Promise.all([
         supabase.rpc('current_permissions'),
-        supabase.from('suppliers').select('id,name,phone,email,address,opening_balance,opening_balance_paid,active,notes,created_at').eq('organization_id',org).eq('active',true).order('name'),
+        supabase.rpc('get_scoped_suppliers').select('id,name,phone,email,address,opening_balance,opening_balance_paid,active,notes,created_at').eq('organization_id',org).eq('active',true).order('name'),
         supabase.from('purchases').select('id,purchase_number,supplier_id,location_id,status,approval_status,payment_status,total_amount,amount_paid,due_date,created_at,locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(500),
         supabase.from('payments').select('id,supplier_id,purchase_id,direction,payment_type,method,amount,reference,notes,created_at,locations(name)').eq('organization_id',org).not('supplier_id','is',null).order('created_at',{ascending:false}).limit(500),
         supabase.from('locations').select('id,name').eq('organization_id',org).eq('active',true).order('name'),

@@ -63,3 +63,6 @@ export async function POST(req,{params}){
   }
 }
 
+// MTN documents both PUT and POST callbacks; both recheck provider status.
+export const PUT=POST
+

@@ -41,7 +41,7 @@ export default function DocumentsPage(){
       setContext(ctx)
       if(!ctx.organization?.id)throw new Error('Complete business setup first.')
       const org=ctx.organization.id
-      const [permRes,locRes,custRes,prodRes,quoteRes,saleRes,purchaseRes,jobRes,invoiceRes,deliveryRes,payrollRes]=await Promise.all([
+      const [permRes,locRes,custRes,prodRes,quoteRes,saleRes,purchaseRes,jobRes,invoiceRes,deliveryRes,payrollRes,periodRes]=await Promise.all([
         supabase.rpc('current_permissions'),
         supabase.from('locations').select('id,name').eq('organization_id',org).eq('active',true).order('name'),
         supabase.from('customers').select('id,name,phone,email').eq('organization_id',org).eq('active',true).order('name'),
@@ -52,13 +52,14 @@ export default function DocumentsPage(){
         supabase.from('work_orders').select('id,job_number,title,customer_id,location_id,status,final_amount,created_at,customers(name),locations(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(30),
         supabase.from('project_invoices').select('id,invoice_number,project_id,customer_id,location_id,status,total_amount,issue_date,projects(project_number,name),customers(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(30),
         supabase.from('deliveries').select('id,delivery_number,customer_id,source_location_id,status,destination,created_at,customers(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(30),
-        supabase.from('payroll_entries').select('id,user_id,payroll_period_id,net_pay,payment_status,created_at,users(full_name),payroll_periods(name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(30),
+        supabase.from('payroll_entries').select('id,user_id,payroll_period_id,net_pay,payment_status,created_at,users(full_name)').eq('organization_id',org).order('created_at',{ascending:false}).limit(30),
+        supabase.rpc('get_scoped_payroll_periods').select('id,name'),
       ])
-      for(const r of [permRes,locRes,custRes,prodRes,quoteRes,saleRes,purchaseRes,jobRes,invoiceRes,deliveryRes,payrollRes])if(r.error)throw r.error
+      for(const r of [permRes,locRes,custRes,prodRes,quoteRes,saleRes,purchaseRes,jobRes,invoiceRes,deliveryRes,payrollRes,periodRes])if(r.error)throw r.error
       setPermissions((permRes.data||[]).map(x=>x.permission))
       setLocations(locRes.data||[]);setCustomers(custRes.data||[]);setProducts(prodRes.data||[])
       setQuotations(quoteRes.data||[]);setSales(saleRes.data||[]);setPurchases(purchaseRes.data||[]);setJobs(jobRes.data||[])
-      setProjectInvoices(invoiceRes.data||[]);setDeliveries(deliveryRes.data||[]);setPayroll(payrollRes.data||[])
+      setProjectInvoices(invoiceRes.data||[]);setDeliveries(deliveryRes.data||[]);setPayroll((payrollRes.data||[]).map(row=>({...row,payroll_periods:periodRes.data?.find(period=>period.id===row.payroll_period_id)||null})))
       setQuote(q=>({...q,location_id:q.location_id||ctx.location?.id||locRes.data?.[0]?.id||'',terms:q.terms||ctx.organization.document_terms||''}))
     }catch(error){setMessage({type:'error',text:error.message||'Could not load business documents.'})}
     finally{setLoading(false)}

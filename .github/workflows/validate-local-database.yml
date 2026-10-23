@@ -7,6 +7,8 @@ on:
       - 'supabase/migrations/**'
       - 'supabase/tests/**'
       - '.github/workflows/validate-local-database.yml'
+      - 'scripts/test-backup-restore.sh'
+      - 'tests/database/**'
   workflow_dispatch:
 
 permissions:
@@ -64,12 +66,18 @@ jobs:
             supabase/tests/universal_logic_regressions.sql \
             supabase/tests/access_and_banking_regressions.sql \
             supabase/tests/business_intelligence_regressions.sql \
-            supabase/tests/production_workflow_integrity.sql
+            supabase/tests/production_workflow_integrity.sql \
+            supabase/tests/scoped_reporting_service_refunds.sql
           do
             echo "::group::Checking established business SQL regressions: $suite"
             docker exec -i "$db_container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$suite"
             echo "::endgroup::"
           done
+      - name: Verify encrypted backup restoration with fictional business data
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes age
+          bash scripts/test-backup-restore.sh
       - name: Stop and destroy the ephemeral database
         if: always()
         run: supabase stop --no-backup || true

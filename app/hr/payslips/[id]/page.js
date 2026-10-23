@@ -27,7 +27,7 @@ export default function PayslipPage(){
       if(eRes.error)throw eRes.error;if(!eRes.data)throw new Error('Payslip not found or you do not have access.')
       setEntry(eRes.data)
       const [pRes,uRes,epRes,cRes]=await Promise.all([
-        supabase.from('payroll_periods').select('*').eq('id',eRes.data.payroll_period_id).maybeSingle(),
+        supabase.rpc('get_scoped_payroll_periods').select('*').eq('id',eRes.data.payroll_period_id).maybeSingle(),
         supabase.from('users').select('id,full_name,email,role,default_location_id').eq('id',eRes.data.user_id).maybeSingle(),
         supabase.from('employee_profiles').select('*').eq('user_id',eRes.data.user_id).maybeSingle(),
         supabase.from('payroll_entry_components').select('*').eq('payroll_entry_id',eRes.data.id).order('created_at')

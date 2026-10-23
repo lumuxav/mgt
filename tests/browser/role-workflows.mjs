@@ -125,6 +125,35 @@ try{
    if(payments.error)throw payments.error
    check(payments.data.length===1,'lost response did not record a second cash receipt')
   }],
+  ['owner',async(page)=>{
+   await page.goto(base+'/work-orders',{waitUntil:'domcontentloaded',timeout:deadline})
+   await page.getByRole('button',{name:/CI Refund Retry Job/}).click({timeout:deadline})
+   const form=page.locator('form').filter({has:page.getByRole('heading',{name:'Refund and cancel job',exact:true})})
+   await form.getByLabel('Reason',{exact:true}).fill('Customer returned unused material')
+   await form.getByLabel('Refund method',{exact:true}).selectOption('bank')
+   await form.getByLabel('Refund account',{exact:true}).selectOption(fixture.refundBankId)
+   await form.getByLabel('Completed refund reference',{exact:true}).fill('BROWSER-REFUND-001')
+   await form.getByLabel('Job materials',{exact:true}).selectOption('returned')
+   const requests=[]
+   await page.route('**/rest/v1/rpc/cancel_service_work_order',async route=>{
+    requests.push(route.request().postDataJSON())
+    const response=await route.fetch()
+    check(response.ok(),'refund request committed successfully')
+    if(requests.length===1)await route.abort('failed')
+    else await route.fulfill({response})
+   })
+   await form.getByRole('button',{name:'Record refund and cancel job',exact:true}).click()
+   await page.getByText(/Failed to fetch|NetworkError|fetch failed/i).first().waitFor({state:'visible',timeout:deadline})
+   await form.getByRole('button',{name:'Record refund and cancel job',exact:true}).evaluate(button=>{button.click();button.click()})
+   await page.getByText(/Job cancelled. Refund recorded:/).waitFor({state:'visible',timeout:deadline})
+   check(requests.length===2&&requests[0].p_request_id===requests[1].p_request_id,'refund lost-response retry preserves one request ID')
+   const refunds=await admin.from('payments').select('id,amount').eq('work_order_id',fixture.refundJobId).eq('direction','out')
+   if(refunds.error)throw refunds.error
+   check(refunds.data.length===1&&Number(refunds.data[0].amount)===10,'browser cancellation refunded once')
+   const stock=await admin.from('stock_balances').select('quantity').eq('product_id',fixture.refundProductId).single()
+   if(stock.error)throw stock.error
+   check(Number(stock.data.quantity)===5,'browser cancellation returned materials once')
+  }],
   ['technician',async(page)=>{
    await ready(page,'/my-work','My Work')
    await page.getByText('CI Assigned Device Repair').waitFor({state:'visible',timeout:deadline})

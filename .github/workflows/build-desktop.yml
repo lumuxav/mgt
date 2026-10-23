@@ -54,8 +54,14 @@ jobs:
         run: node -e "const fs=require('fs');const p=require('./package.json');p.version='1.1.'+process.env.MGT_RELEASE_NUMBER;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
       - name: Package desktop application
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run dist -- ${{ matrix.args }}
+          MGT_WINDOWS_CERTIFICATE_BASE64: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_WINDOWS_CERTIFICATE_BASE64 || '' }}
+          MGT_WINDOWS_CERTIFICATE_PASSWORD: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          MGT_MAC_CERTIFICATE_BASE64: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_MAC_CERTIFICATE_BASE64 || '' }}
+          MGT_MAC_CERTIFICATE_PASSWORD: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_MAC_CERTIFICATE_PASSWORD || '' }}
+          MGT_APPLE_API_KEY_BASE64: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_APPLE_API_KEY_BASE64 || '' }}
+          MGT_APPLE_API_KEY_ID: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_APPLE_API_KEY_ID || '' }}
+          MGT_APPLE_API_ISSUER: ${{ github.ref == 'refs/heads/universal-business-platform' && github.event_name != 'pull_request' && secrets.MGT_APPLE_API_ISSUER || '' }}
+        run: node build-release.cjs ${{ matrix.platform }} ${{ matrix.arch }}
       - name: Upload installer
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
@@ -65,5 +71,6 @@ jobs:
             desktop/dist/*.exe
             desktop/dist/*.AppImage
             desktop/dist/*.dmg
+            desktop/dist/SIGNING-*.json
           if-no-files-found: error
           retention-days: 1
