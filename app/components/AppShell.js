@@ -110,6 +110,7 @@ export default function AppShell({ children }) {
   const [accessError, setAccessError] = useState(null)
   const [accessAttempt, setAccessAttempt] = useState(0)
   const [notificationCount,setNotificationCount] = useState(0)
+  const [notificationError,setNotificationError] = useState('')
   const [mobileMenu,setMobileMenu] = useState({ path: pathname, open: false })
   if (mobileMenu.path !== pathname) setMobileMenu({ path: pathname, open: false })
   const mobileMenuOpen = mobileMenu.path === pathname && mobileMenu.open
@@ -312,9 +313,11 @@ export default function AppShell({ children }) {
         const inbox = await loadNotificationInbox({
           userId,
           organizationId: profile.organization_id,
-          limit: 250,
         })
-        if (mounted) setNotificationCount(inbox.unread)
+        if (mounted) {
+          setNotificationCount(inbox.unread)
+          setNotificationError('')
+        }
 
         if (
           inserted &&
@@ -329,7 +332,9 @@ export default function AppShell({ children }) {
             icon: '/icon.svg',
           })
         }
-      } catch {}
+      } catch (error) {
+        if (mounted) setNotificationError(error?.message || 'Could not refresh notifications.')
+      }
     }
 
     refreshNotifications({ sync: true })
@@ -487,6 +492,7 @@ export default function AppShell({ children }) {
           </div>
         </header>
         <div className="app-content">
+          {notificationError&&<div className="mx-auto mt-3 max-w-7xl px-4" role="status"><p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">Notifications could not be refreshed: {notificationError}</p></div>}
           {routeModuleDisabled || routePermissionDenied ? (
             <main className="page-wrap">
               <section className="page-card mx-auto max-w-2xl p-7 text-center">
@@ -550,4 +556,3 @@ export default function AppShell({ children }) {
     </div>
   )
 }
-

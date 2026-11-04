@@ -21,7 +21,7 @@ declare
  org uuid:=gen_random_uuid(); other_org uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid();
  cashier uuid:=gen_random_uuid(); worker uuid:=gen_random_uuid(); driver uuid:=gen_random_uuid();
  loc uuid:=gen_random_uuid(); second_loc uuid:=gen_random_uuid(); foreign_loc uuid:=gen_random_uuid();
- product uuid:=gen_random_uuid(); customer uuid:=gen_random_uuid(); request_id uuid:=gen_random_uuid();
+ product uuid:=gen_random_uuid(); customer uuid:=gen_random_uuid(); stock_customer uuid:=gen_random_uuid(); request_id uuid:=gen_random_uuid();
  result jsonb; retry jsonb; sale uuid; other_sale uuid; job uuid; line uuid; project uuid; project2 uuid; payroll uuid;
  vehicle uuid; delivery uuid; delivery2 uuid; pending_delivery uuid; qty numeric; n integer; r record; args text;
  supplier uuid:=gen_random_uuid(); purchase_a uuid:=gen_random_uuid(); purchase_b uuid:=gen_random_uuid(); approval uuid; task_id uuid;
@@ -40,7 +40,8 @@ begin
  (worker,org,'Audit project worker','project_worker',loc),(driver,org,'Audit driver','delivery_driver',loc);
  insert into public.products(id,organization_id,name,selling_price,cost_price) values(product,org,'Regression stock',10,4);
  insert into public.stock_balances(product_id,location_id,quantity) values(product,loc,100),(product,second_loc,100);
- insert into public.customers(id,organization_id,name,credit_limit) values(customer,org,'Regression buyer',10000);
+ insert into public.customers(id,organization_id,name,credit_limit)
+ values(customer,org,'Regression buyer',10000),(stock_customer,org,'Stock lifecycle buyer',10000);
  perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_id,'role','authenticated')::text,true);
  items:=jsonb_build_array(jsonb_build_object('product_id',product,'quantity',2));
  tender:=jsonb_build_array(jsonb_build_object('method','bank','amount',20));
@@ -50,6 +51,43 @@ begin
  perform pg_temp.check_true('Checkout retry returns original sale',result=retry);
  perform pg_temp.check_true('Checkout retry deducts stock once',(select quantity=98 from public.stock_balances where product_id=product and location_id=loc));
  perform pg_temp.check_true('Checkout retry records payment once',(select count(*)=1 from public.payments where sale_id=sale));
+ result:=public.post_pos_sale(loc,stock_customer,items);
+ sale:=(result->>'sale_id')::uuid;
+ perform pg_temp.check_true('Unpaid dispatched POS sale holds stock without reducing on-hand',(select quantity=98 and reserved_quantity=2 from public.stock_balances where product_id=product and location_id=loc));
+ result:=public.record_customer_payment(stock_customer,loc,1,'bank');
+ perform pg_temp.check_true('Any confirmed partial payment consumes dispatched stock once',(select quantity=96 and reserved_quantity=0 from public.stock_balances where product_id=product and location_id=loc));
+ result:=public.record_customer_payment(stock_customer,loc,1,'bank');
+ perform pg_temp.check_true('Repeated partial payment does not consume stock twice',(select quantity=96 from public.stock_balances where product_id=product and location_id=loc));
+ perform pg_temp.check_true('Partial-payment stock consumption has one movement',(select count(*)=1 from public.stock_movements where reference_type='sale' and reference_id=sale));
+ select id into line from public.sale_items where sale_id=sale;
+ perform public.process_sale_return(sale,jsonb_build_array(jsonb_build_object('sale_item_id',line,'quantity',1)),'bank');
+ perform pg_temp.check_true('Return after consumption restores returned stock',(select quantity=97 from public.stock_balances where product_id=product and location_id=loc));
+ result:=public.post_pos_sale(loc,stock_customer,items);
+ sale:=(result->>'sale_id')::uuid;
+ select id into line from public.sale_items where sale_id=sale;
+ perform public.process_sale_return(sale,jsonb_build_array(jsonb_build_object('sale_item_id',line,'quantity',2)),'bank');
+ perform pg_temp.check_true('Return before payment releases hold without inflating stock',(select quantity=97 and reserved_quantity=0 from public.stock_balances where product_id=product and location_id=loc));
+ perform pg_temp.check_true('Returned unpaid hold is recorded as released',(select status='released' from public.sale_stock_holds where sale_id=sale and product_id=product));
+ result:=public.post_pos_sale(loc,stock_customer,items,'[]'::jsonb,0,'ecommerce');
+ sale:=(result->>'sale_id')::uuid;
+ update public.sale_stock_holds set dispatched=false where sale_id=sale;
+ insert into public.deliveries(organization_id,delivery_number,source_location_id,sale_id,destination)
+ values(org,'AUDIT-OUT-001',loc,sale,'Audit destination') returning id into delivery;
+ update public.sales set amount_paid=1,payment_status='partial' where id=sale;
+ perform pg_temp.check_true('Online payment before dispatch keeps stock reserved',(select quantity=97 and reserved_quantity=2 from public.stock_balances where product_id=product and location_id=loc));
+ update public.deliveries set status='dispatched' where id=delivery;
+ perform pg_temp.check_true('Dispatch after payment consumes reserved stock',(select quantity=95 and reserved_quantity=0 from public.stock_balances where product_id=product and location_id=loc));
+ result:=public.post_pos_sale(loc,stock_customer,items,'[]'::jsonb,0,'ecommerce');
+ sale:=(result->>'sale_id')::uuid;
+ update public.sale_stock_holds set dispatched=false where sale_id=sale;
+ insert into public.deliveries(organization_id,delivery_number,source_location_id,sale_id,destination)
+ values(org,'AUDIT-OUT-002',loc,sale,'Audit destination') returning id into delivery2;
+ update public.deliveries set status='dispatched' where id=delivery2;
+ perform pg_temp.check_true('Dispatch before payment keeps stock reserved',(select quantity=95 and reserved_quantity=2 from public.stock_balances where product_id=product and location_id=loc));
+ update public.sales set amount_paid=1,payment_status='partial' where id=sale;
+ perform pg_temp.check_true('Payment after dispatch consumes reserved stock',(select quantity=93 and reserved_quantity=0 from public.stock_balances where product_id=product and location_id=loc));
+ update public.sales set amount_paid=2 where id=sale;
+ perform pg_temp.check_true('Repeated online settlement remains idempotent',(select quantity=93 from public.stock_balances where product_id=product and location_id=loc));
  perform pg_temp.reject('Checkout key cannot be reused with another cart',format('select public.post_pos_sale_once(%L,%L,null,%L::jsonb,%L::jsonb)',request_id,loc,jsonb_build_array(jsonb_build_object('product_id',product,'quantity',1)),tender),'different sale details');
  perform pg_temp.check_true('Legacy immediate receiving is no longer public',not has_function_privilege('authenticated','public.receive_purchase(uuid,uuid,jsonb,numeric,text,text)','EXECUTE'));
  perform pg_temp.check_true('Anonymous checkout is forbidden',not has_function_privilege('anon','public.post_pos_sale_once(uuid,uuid,uuid,jsonb,jsonb,numeric,text,text,text)','EXECUTE'));

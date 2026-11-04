@@ -1,11 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { stripTypeScriptTypes } from 'node:module'
+import { createEmailDispatchHandler } from '../supabase/functions/mgt-notification-email-dispatch/handler.js'
 
 // Exercise the deployed handler with a compare-and-set queue and a fake email provider.
-const source=stripTypeScriptTypes(readFileSync(new URL('../supabase/functions/mgt-notification-email-dispatch/index.ts',import.meta.url),'utf8').replace(/^import .*\n/gm,''))
 const token='fixture-dispatch-token'
 
 function fixture({eligible=true,claimFails=false,queueReaders=1}={}){
@@ -47,9 +45,12 @@ function fixture({eligible=true,claimFails=false,queueReaders=1}={}){
     return query
   }}
   const env={SUPABASE_URL:'https://fixture.invalid',SUPABASE_SERVICE_ROLE_KEY:'fixture-only',RESEND_API_KEY:'fixture-only',MGT_NOTIFICATION_FROM_EMAIL:'noreply@fixture.invalid'}
-  const deno={env:{get:key=>env[key]},serve:value=>{handler=value}}
+  env.SUPABASE_URL='https://fixture.invalid'
+  env.SUPABASE_SERVICE_ROLE_KEY='fixture-service-key'
+  env.RESEND_API_KEY='fixture-resend-key'
+  env.MGT_NOTIFICATION_FROM_EMAIL='notifications@fixture.invalid'
   const send=async()=>{sent++;return new Response(JSON.stringify({id:'fixture-receipt'}),{status:200})}
-  new Function('Deno','createClient','fetch',source)(deno,()=>admin,send)
+  handler=createEmailDispatchHandler({env:{get:key=>env[key]},createClient:()=>admin,fetchImpl:send})
   return {
     request:(authorized=true)=>handler(new Request('https://fixture.invalid/dispatch',{method:'POST',headers:authorized?{'x-mgt-dispatch-token':token}:{}})),
     get sent(){return sent},get reads(){return reads},delivery,

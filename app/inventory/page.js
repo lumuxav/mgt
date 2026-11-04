@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { reportRows } from '../../lib/reportRows'
 import { useOnlineStatus } from '../../lib/useOnlineStatus'
 import BarcodeScanner from '../components/BarcodeScanner'
 
@@ -42,6 +43,7 @@ export default function InventoryPage() {
   const [stocktakeLocation, setStocktakeLocation] = useState('')
   const [counts, setCounts] = useState({})
   const [stocktakeNotes, setStocktakeNotes] = useState('')
+  const loadRequest = useRef(0)
 
   const currency = context?.organization?.currency || business.currency || 'UGX'
   const canAdjust = permissions.includes('inventory.adjust')
@@ -49,19 +51,19 @@ export default function InventoryPage() {
   const canStocktake = permissions.includes('inventory.stocktake')
   const online = useOnlineStatus()
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({quiet=false}={}) => {
+    const request=++loadRequest.current
+    if(!quiet)setLoading(true)
     try {
       const ctx = await getPlatformContext()
-      setContext(ctx)
       if (!ctx.organization?.id) throw new Error('Complete business setup first.')
       const org = ctx.organization.id
 
       const [permRes, productRes, locationRes, balanceRes, movementRes, transferRes, stocktakeRes] = await Promise.all([
         supabase.rpc('current_permissions'),
-        supabase.from('products').select('id,name,sku,barcode,unit,item_type,track_inventory,cost_price,selling_price,reorder_level').eq('organization_id', org).eq('active', true).eq('track_inventory', true).order('name'),
-        supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true).order('name'),
-        supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,updated_at,products(name,sku,barcode,unit,cost_price,reorder_level,organization_id),locations(name,organization_id)'),
+        reportRows(supabase.from('products').select('id,name,sku,barcode,unit,item_type,track_inventory,cost_price,selling_price,reorder_level').eq('organization_id', org).eq('active', true).eq('track_inventory', true),['name','id']),
+        reportRows(supabase.from('locations').select('id,name,type').eq('organization_id', org).eq('active', true),['name','id']),
+        reportRows(supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,updated_at,products!inner(name,sku,barcode,unit,cost_price,reorder_level,organization_id),locations!inner(name,organization_id)').eq('products.organization_id',org).eq('locations.organization_id',org),['product_id','location_id']),
         supabase.from('stock_movements').select('id,location_id,product_id,movement_type,quantity,unit_cost,reference_type,notes,recorded_by,created_at,products(name,sku),locations(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(250),
         supabase.from('stock_transfers').select('id,transfer_number,from_location_id,to_location_id,status,notes,created_at,from:locations!stock_transfers_from_location_id_fkey(name),to:locations!stock_transfers_to_location_id_fkey(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(80),
         supabase.from('stocktakes').select('id,stocktake_number,location_id,total_variance_units,total_variance_value,notes,created_at,locations(name)').eq('organization_id', org).order('created_at', { ascending: false }).limit(80),
@@ -69,10 +71,30 @@ export default function InventoryPage() {
 
       for (const result of [permRes, productRes, locationRes, balanceRes, movementRes, transferRes, stocktakeRes]) if (result.error) throw result.error
 
+      const nextProducts=productRes.data||[]
+      const nextLocations=locationRes.data||[]
+      const balancesByKey=new Map((balanceRes.data||[])
+        .filter((row)=>row.products?.organization_id===org&&row.locations?.organization_id===org)
+        .map((row)=>[`${row.product_id}:${row.location_id}`,row]))
+      const completeBalances=[]
+      for(const location of nextLocations)for(const product of nextProducts){
+        const row=balancesByKey.get(`${product.id}:${location.id}`)
+        completeBalances.push({
+          ...(row||{quantity:0,reserved_quantity:0}),
+          product_id:product.id,
+          location_id:location.id,
+          products:{...(row?.products||{}),name:product.name,sku:product.sku,barcode:product.barcode,unit:product.unit,cost_price:product.cost_price,reorder_level:product.reorder_level,organization_id:org},
+          locations:{...(row?.locations||{}),id:location.id,name:location.name,organization_id:org},
+        })
+      }
+
+      if(request!==loadRequest.current)return
+      setContext(ctx)
+      setMessage(null)
       setPermissions((permRes.data || []).map((row) => row.permission))
-      setProducts(productRes.data || [])
-      setLocations(locationRes.data || [])
-      setBalances((balanceRes.data || []).filter((row) => row.products?.organization_id === org && row.locations?.organization_id === org))
+      setProducts(nextProducts)
+      setLocations(nextLocations)
+      setBalances(completeBalances)
       setMovements(movementRes.data || [])
       setTransfers(transferRes.data || [])
       setStocktakes(stocktakeRes.data || [])
@@ -85,13 +107,25 @@ export default function InventoryPage() {
       setToLocation((value) => value || locationRes.data?.find((item) => item.id !== defaultLocation)?.id || '')
       setAdjustProduct((value) => value || productRes.data?.[0]?.id || '')
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || 'Could not load inventory.' })
+      if(request===loadRequest.current)setMessage({ type: 'error', text: error.message || 'Could not load inventory.' })
     } finally {
-      setLoading(false)
+      if(request===loadRequest.current)setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    void load()
+    const refresh=()=>{if(document.visibilityState==='visible')void load({quiet:true})}
+    const interval=window.setInterval(refresh,30000)
+    window.addEventListener('focus',refresh)
+    document.addEventListener('visibilitychange',refresh)
+    return ()=>{
+      loadRequest.current+=1
+      window.clearInterval(interval)
+      window.removeEventListener('focus',refresh)
+      document.removeEventListener('visibilitychange',refresh)
+    }
+  }, [])
 
   const quantityFor = (productId, locationId) => {
     const row = balances.find((item) => item.product_id === productId && item.location_id === locationId)
@@ -396,4 +430,3 @@ export default function InventoryPage() {
     </main>
   )
 }
-

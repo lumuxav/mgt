@@ -56,7 +56,7 @@ export default function NotificationsPage(){
       setContext(ctx)
       if(!ctx.user?.id||!ctx.organization?.id)throw new Error('Complete business setup first.')
       if(sync)await syncNotificationSystem()
-      const inbox=await loadNotificationInbox({userId:ctx.user.id,organizationId:ctx.organization.id,limit:300})
+      const inbox=await loadNotificationInbox({userId:ctx.user.id,organizationId:ctx.organization.id})
       setItems(inbox.items)
       setPreferences(inbox.preferences)
     }catch(error){

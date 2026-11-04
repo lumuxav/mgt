@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getPlatformContext } from '../../lib/platformDb'
 import { getBusinessConfig } from '../../lib/platformConfig'
+import { reportRows } from '../../lib/reportRows'
+import { purchasePayable } from '../../lib/balances'
 
 const money = (value, currency) => `${Number(value || 0).toLocaleString()} ${currency || ''}`.trim()
 
@@ -12,10 +14,11 @@ export default function AlertsPage() {
   const business = getBusinessConfig()
   const [context,setContext] = useState(null)
   const [products,setProducts] = useState([])
+  const [locations,setLocations] = useState([])
   const [balances,setBalances] = useState([])
   const [purchases,setPurchases] = useState([])
-  const [sales,setSales] = useState([])
   const [customers,setCustomers] = useState([])
+  const [customerBalances,setCustomerBalances] = useState([])
   const [workOrders,setWorkOrders] = useState([])
   const [assets,setAssets] = useState([])
   const [maintenance,setMaintenance] = useState([])
@@ -27,57 +30,98 @@ export default function AlertsPage() {
   const [projectInvoices,setProjectInvoices] = useState([])
   const [message,setMessage] = useState('')
   const [loading,setLoading] = useState(true)
+  const loadRequest = useRef(0)
 
   const currency = context?.organization?.currency || business.currency || 'UGX'
 
-  useEffect(()=>{
-    const load = async () => {
-      try {
-        const ctx = await getPlatformContext()
-        setContext(ctx)
-        if(!ctx.organization?.id) throw new Error('Complete business setup first.')
-        const org = ctx.organization.id
+  const load = async ({quiet=false}={}) => {
+    const request=++loadRequest.current
+    if(!quiet)setLoading(true)
+    try {
+      const ctx = await getPlatformContext()
+      if(!ctx.organization?.id) throw new Error('Complete business setup first.')
+      const org = ctx.organization.id
 
-        const [productRes,balanceRes,purchaseRes,saleRes,customerRes,workOrderRes,assetRes,maintenanceRes,vehicleRes,deliveryRes,projectRes,projectTaskRes,projectMilestoneRes,projectInvoiceRes] = await Promise.all([
-          supabase.from('products').select('id,name,sku,reorder_level,cost_price').eq('organization_id',org).eq('active',true).eq('track_inventory',true),
-          supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,locations(name),products(organization_id)'),
-          supabase.from('purchases').select('id,purchase_number,supplier_id,status,payment_status,total_amount,amount_paid,due_date,created_at,suppliers(name),locations(name)').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('sales').select('id,sale_number,customer_id,total_amount,amount_paid,refunded_amount,payment_status,created_at,customers(name)').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('customers').select('id,name,credit_limit').eq('organization_id',org).eq('active',true),
-          supabase.from('work_orders').select('id,job_number,title,status,priority,due_at,scheduled_at,customer_id,customers(name),locations(name)').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('assets').select('id,asset_number,name,status,next_service_date,location_id,locations(name)').eq('organization_id',org).eq('active',true),
-          supabase.from('asset_maintenance').select('id,maintenance_number,asset_id,status,priority,scheduled_date,description,assets(name,asset_number)').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('vehicles').select('id,registration_number,status,odometer,service_due_odometer,insurance_expiry,license_expiry').eq('organization_id',org).eq('active',true),
-          supabase.from('deliveries').select('id,delivery_number,status,destination,scheduled_at,vehicle_id,driver_user_id').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('projects').select('id,project_number,name,status,priority,due_date,progress_percent,customer_id,customers(name),locations(name)').eq('organization_id',org).order('created_at',{ascending:false}),
-          supabase.from('project_tasks').select('id,project_id,title,status,priority,due_date,assigned_user_id,projects(project_number,name)').eq('organization_id',org).order('due_date',{ascending:true,nullsFirst:false}),
-          supabase.from('project_milestones').select('id,project_id,name,status,due_date,projects(project_number,name)').eq('organization_id',org).order('due_date',{ascending:true,nullsFirst:false}),
-          supabase.from('project_invoices').select('id,invoice_number,project_id,status,total_amount,amount_paid,due_date,projects(project_number,name),customers(name)').eq('organization_id',org).order('created_at',{ascending:false}),
-        ])
+      const [permissionRes,productRes,locationRes,balanceRes,purchaseRes,customerRes,workOrderRes,assetRes,maintenanceRes,vehicleRes,deliveryRes,projectRes,projectTaskRes,projectMilestoneRes,projectInvoiceRes] = await Promise.all([
+        supabase.rpc('current_permissions'),
+        reportRows(supabase.from('products').select('id,name,sku,reorder_level,cost_price').eq('organization_id',org).eq('active',true).eq('track_inventory',true),['id']),
+        reportRows(supabase.from('locations').select('id,name').eq('organization_id',org).eq('active',true),['id']),
+        reportRows(supabase.from('stock_balances').select('product_id,location_id,quantity,reserved_quantity,products!inner(organization_id)').eq('products.organization_id',org),['product_id','location_id']),
+        reportRows(supabase.from('purchases').select('id,purchase_number,supplier_id,status,approval_status,payment_status,total_amount,amount_paid,due_date,created_at,suppliers(name),locations(name)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('customers').select('id,name,credit_limit').eq('organization_id',org).eq('active',true),['id']),
+        reportRows(supabase.from('work_orders').select('id,job_number,title,status,priority,due_at,scheduled_at,customer_id,customers(name),locations(name)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('assets').select('id,asset_number,name,status,next_service_date,location_id,locations(name)').eq('organization_id',org).eq('active',true),['id']),
+        reportRows(supabase.from('asset_maintenance').select('id,maintenance_number,asset_id,status,priority,scheduled_date,description,assets(name,asset_number)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('vehicles').select('id,registration_number,status,odometer,service_due_odometer,insurance_expiry,license_expiry').eq('organization_id',org).eq('active',true),['id']),
+        reportRows(supabase.from('deliveries').select('id,delivery_number,status,destination,scheduled_at,vehicle_id,driver_user_id').eq('organization_id',org),['id']),
+        reportRows(supabase.from('projects').select('id,project_number,name,status,priority,due_date,progress_percent,customer_id,customers(name),locations(name)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('project_tasks').select('id,project_id,title,status,priority,due_date,assigned_user_id,projects(project_number,name)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('project_milestones').select('id,project_id,name,status,due_date,projects(project_number,name)').eq('organization_id',org),['id']),
+        reportRows(supabase.from('project_invoices').select('id,invoice_number,project_id,status,total_amount,amount_paid,due_date,projects(project_number,name),customers(name)').eq('organization_id',org),['id']),
+      ])
 
-        for (const result of [productRes,balanceRes,purchaseRes,saleRes,customerRes,workOrderRes,assetRes,maintenanceRes,vehicleRes,deliveryRes,projectRes,projectTaskRes,projectMilestoneRes,projectInvoiceRes]) if(result.error) throw result.error
+      for (const result of [permissionRes,productRes,locationRes,balanceRes,purchaseRes,customerRes,workOrderRes,assetRes,maintenanceRes,vehicleRes,deliveryRes,projectRes,projectTaskRes,projectMilestoneRes,projectInvoiceRes]) if(result.error) throw result.error
 
-        setProducts(productRes.data || [])
-        setBalances((balanceRes.data || []).filter((row)=>row.products?.organization_id===org))
-        setPurchases(purchaseRes.data || [])
-        setSales(saleRes.data || [])
-        setCustomers(customerRes.data || [])
-        setWorkOrders(workOrderRes.data || [])
-        setAssets(assetRes.data || [])
-        setMaintenance(maintenanceRes.data || [])
-        setVehicles(vehicleRes.data || [])
-        setDeliveries(deliveryRes.data || [])
-        setProjects(projectRes.data || [])
-        setProjectTasks(projectTaskRes.data || [])
-        setProjectMilestones(projectMilestoneRes.data || [])
-        setProjectInvoices(projectInvoiceRes.data || [])
-      } catch(error) {
-        setMessage(error.message || 'Could not load alerts.')
-      } finally {
-        setLoading(false)
+      const permissions=(permissionRes.data||[]).map((row)=>row.permission)
+      const canViewCustomerBalances=['sales.view','sales.create','finance.view','customers.view','payments.view','payments.request','reports.view']
+        .some((permission)=>permissions.includes(permission))
+      const customerBalanceRes=canViewCustomerBalances
+        ?await supabase.rpc('get_customer_sales_balances')
+        :{data:[],error:null}
+      if(customerBalanceRes.error)throw customerBalanceRes.error
+
+      const nextProducts=productRes.data||[]
+      const nextLocations=locationRes.data||[]
+      const currentBalances=new Map((balanceRes.data||[]).map((row)=>[`${row.product_id}:${row.location_id}`,row]))
+      const completeBalances=[]
+      for(const location of nextLocations)for(const product of nextProducts){
+        const row=currentBalances.get(`${product.id}:${location.id}`)
+        completeBalances.push({
+          ...(row||{quantity:0,reserved_quantity:0}),
+          product_id:product.id,
+          location_id:location.id,
+          products:{...product,organization_id:org},
+          locations:{...location,organization_id:org},
+        })
       }
+
+      if(request!==loadRequest.current)return
+      setContext(ctx)
+      setMessage('')
+      setProducts(nextProducts)
+      setLocations(nextLocations)
+      setBalances(completeBalances)
+      setPurchases(purchaseRes.data||[])
+      setCustomers(customerRes.data||[])
+      setCustomerBalances(customerBalanceRes.data||[])
+      setWorkOrders(workOrderRes.data||[])
+      setAssets(assetRes.data||[])
+      setMaintenance(maintenanceRes.data||[])
+      setVehicles(vehicleRes.data||[])
+      setDeliveries(deliveryRes.data||[])
+      setProjects(projectRes.data||[])
+      setProjectTasks(projectTaskRes.data||[])
+      setProjectMilestones(projectMilestoneRes.data||[])
+      setProjectInvoices(projectInvoiceRes.data||[])
+    } catch(error) {
+      if(request===loadRequest.current)setMessage(error.message || 'Could not load alerts.')
+    } finally {
+      if(request===loadRequest.current)setLoading(false)
     }
-    load()
+  }
+
+  useEffect(()=>{
+    void load()
+    const refresh=()=>{if(document.visibilityState==='visible')void load({quiet:true})}
+    const interval=window.setInterval(refresh,60000)
+    window.addEventListener('focus',refresh)
+    document.addEventListener('visibilitychange',refresh)
+    return ()=>{
+      loadRequest.current+=1
+      window.clearInterval(interval)
+      window.removeEventListener('focus',refresh)
+      document.removeEventListener('visibilitychange',refresh)
+    }
   },[])
 
   const alerts = useMemo(()=>{
@@ -105,7 +149,10 @@ export default function AlertsPage() {
     const now = new Date()
     for(const purchase of purchases){
       const due = Math.max(0,Number(purchase.total_amount||0)-Number(purchase.amount_paid||0))
-      if(purchase.due_date && purchase.payment_status!=='paid' && due>0.009 && new Date(purchase.due_date+'T23:59:59')<now){
+      const purchaseEligible=['not_required','approved'].includes(purchase.approval_status)
+        && !['draft','pending_approval','rejected','cancelled'].includes(purchase.status)
+      const payable=purchasePayable(purchase)
+      if(payable>0.009 && purchase.due_date && purchase.payment_status!=='paid' && new Date(purchase.due_date+'T23:59:59')<now){
         list.push({
           key:`purchase-due-${purchase.id}`,
           tone:'red',
@@ -116,7 +163,7 @@ export default function AlertsPage() {
           action:'Open supplier account',
         })
       }
-      if(['ordered','partial'].includes(purchase.status)){
+      if(purchaseEligible && ['ordered','partial'].includes(purchase.status)){
         const ageDays = Math.floor((now-new Date(purchase.created_at))/86400000)
         if(ageDays>=7){
           list.push({
@@ -272,13 +319,7 @@ export default function AlertsPage() {
       }
     }
 
-        const debtMap = {}
-    for(const sale of sales){
-      if(!sale.customer_id) continue
-      const due = Math.max(0,Number(sale.total_amount||0)-Number(sale.refunded_amount||0)-Number(sale.amount_paid||0))
-      debtMap[sale.customer_id]=(debtMap[sale.customer_id]||0)+due
-    }
-
+    const debtMap=Object.fromEntries(customerBalances.map((row)=>[row.customer_id,Number(row.balance_due||0)]))
     for(const customer of customers){
       const owed = Number(debtMap[customer.id]||0)
       const limit = Number(customer.credit_limit||0)
@@ -297,7 +338,7 @@ export default function AlertsPage() {
 
     const rank={red:0,amber:1,blue:2}
     return list.sort((a,b)=>(rank[a.tone]??9)-(rank[b.tone]??9))
-  },[products,balances,purchases,sales,customers,workOrders,assets,maintenance,vehicles,deliveries,projects,projectTasks,projectMilestones,projectInvoices,currency])
+  },[products,balances,purchases,customers,customerBalances,workOrders,assets,maintenance,vehicles,deliveries,projects,projectTasks,projectMilestones,projectInvoices,currency])
 
   const redCount=alerts.filter((item)=>item.tone==='red').length
   const amberCount=alerts.filter((item)=>item.tone==='amber').length
